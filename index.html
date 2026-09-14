@@ -154,12 +154,12 @@
     <div>
       <div class="panel" id="invpanel">
         <h2>Inventory cross-reference <span id="invcount"></span></h2>
-        <div class="muted" style="font-size:12px;margin-bottom:8px">Paste or upload the Inventory Summary export (stock #, model, color, status, Res., Presold, Comments). Units are matched to orders by model code and by customer name in Res./Presold/Comments. Nothing is uploaded anywhere — it stays in this browser.</div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px" id="invsrc">Loads <code>inventory.csv</code> from the repo (Inventory Summary export). Units match orders by model code and by the customer name in Comments ("XX#LASTNAME"). Paste or upload a newer export below to override in this browser only.</div>
         <textarea id="invText" placeholder="Paste Inventory Summary CSV here…"></textarea>
         <div class="bar" style="margin-top:6px">
           <button class="primary" id="btnInv">Load inventory</button>
           <label class="tab" style="cursor:pointer">Upload CSV <input type="file" id="fileInv" accept=".csv,.txt" hidden></label>
-          <button id="btnInvClear">Clear</button>
+          <button id="btnInvClear" title="Drop the pasted override and go back to the repo's inventory.csv">Reset to repo file</button>
         </div>
         <details id="colmapWrap" style="display:none"><summary>Column mapping (auto-detected — adjust if wrong)</summary><div class="colmap" id="colmap"></div></details>
         <div id="invlist" style="margin-top:8px"></div>
@@ -335,11 +335,13 @@ function computeSeq(){
       return a.date-b.date || a.rowNum-b.rowNum;
     });
     list.forEach((o,i)=>o.seq=i+1);
+    list.forEach(o=>{ o.unit=unitForOrder(o); });
     list.forEach(o=>{
       const st=statusOf(o).status;
       o.flag=null;
-      if(st!=='filled'||!o.date) return;
-      const older=list.filter(p=>p!==o && statusOf(p).status==='open' && p.date && p.date<o.date && p.altCodes.some(c=>o.altCodes.includes(c)));
+      const done=st==='filled'||(st==='open'&&o.unit);
+      if(!done||!o.date) return;
+      const older=list.filter(p=>p!==o && statusOf(p).status==='open' && !p.unit && p.date && p.date<o.date && p.altCodes.some(c=>o.altCodes.includes(c)));
       if(older.length) o.flag=older;
     });
   });
@@ -351,12 +353,15 @@ const INV_FIELDS=[
   ['code',['MODEL CODE','MODEL','MDL','SERIES']],
   ['ext',['EXT COLOR','EXT','EXTERIOR','COLOR']],
   ['int',['INT COLOR','INT','INTERIOR']],
-  ['status',['STATUS','STAT','LOC']],
+  ['status',['CAT.','CAT','STATUS','STAT','LOC']],
+  ['modelName',['MODEL NAME','DESCRIPTION','DESC']],
+  ['acc',['ACCESSORIES','ACCESORIES','ACC']],
+  ['dis',['DIS','DAYS']],
   ['res',['RES.','RES','RESERVED']],
   ['presold',['PRESOLD','PRE-SOLD','SOLD TO']],
   ['comments',['COMMENTS','COMMENT','NOTES','REMARKS']],
   ['vin',['VIN']],
-  ['msrp',['MSRP','PRICE','TOTAL MSRP']],
+  ['msrp',['TOTAL SRP','MSRP','SRP','PRICE','TOTAL MSRP']],
   ['eta',['ETA','ARRIVAL','DATE']],
 ];
 function detectInvColumns(H){
@@ -369,7 +374,7 @@ function detectInvColumns(H){
   });
   return map;
 }
-function loadInventory(text){
+function loadInventory(text,persist=true){
   const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()!==''));
   if(rows.length<2){ toast('No inventory rows found'); return; }
   // find header row: first row that contains a recognizable header
@@ -377,33 +382,41 @@ function loadInventory(text){
   if(hi<0) hi=0;
   const H=rows[hi].map(normHeader);
   INV={headers:H, map:detectInvColumns(H), rows:rows.slice(hi+1), raw:text};
-  try{localStorage.setItem(INV_KEY,text);}catch(e){}
+  if(persist){ try{localStorage.setItem(INV_KEY,text);}catch(e){} }
   buildInvUnits(); renderColMap(); render();
 }
+let CODE_TO_MODEL={};
 function buildInvUnits(){
   if(!INV) return;
+  CODE_TO_MODEL={}; ORDERS.forEach(o=>o.altCodes.forEach(c=>{ if(!CODE_TO_MODEL[c]) CODE_TO_MODEL[c]=o.model; }));
   const m=INV.map, g=(r,f)=>m[f]>=0?(r[m[f]]||'').trim():'';
   INV.units=INV.rows.map((r,i)=>{
     const codeRaw=g(r,'code');
     const u={i, stock:g(r,'stock'), codeRaw, code:(codeRaw.match(/\d{4}/)||[''])[0], ext:g(r,'ext'), int:g(r,'int'),
-      status:g(r,'status'), res:g(r,'res'), presold:g(r,'presold'), comments:g(r,'comments'), vin:g(r,'vin'), msrp:g(r,'msrp'), eta:g(r,'eta'), raw:r};
-    u.nameBlob=(u.res+' '+u.presold+' '+u.comments).toUpperCase();
+      status:g(r,'status'), res:g(r,'res'), presold:g(r,'presold'), comments:g(r,'comments'), vin:g(r,'vin'), msrp:g(r,'msrp'), eta:g(r,'eta'),
+      modelName:g(r,'modelName'), acc:g(r,'acc'), dis:g(r,'dis'), raw:r};
+    u.reserved=/^Y/i.test(u.res)||/^TRUE/i.test(u.presold);
+    // Comments are usually "XX#LASTNAME" or "XX LASTNAME" (sales initials + customer)
+    const cm=u.comments.trim().match(/^([A-Z]{2})\s*#?\s*(.*)$/i);
+    u.salesInit=cm?cm[1].toUpperCase():''; u.nameBlob=(cm?cm[2]:u.comments).toUpperCase();
+    if(!/[A-Z]{3}/.test(u.nameBlob)) u.nameBlob='';
     return u;
   }).filter(u=>u.stock||u.code||u.vin);
   // match units to orders by last name appearing in Res/Presold/Comments (and same model code family when possible)
   INV.units.forEach(u=>{
     u.matches=[];
     if(!u.nameBlob.trim()) return;
+    const blob=' '+u.nameBlob.replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim()+' ';
+    // only match within the model family the unit's code belongs to (a 6722 unit can fill a 6724 order, but a Corolla can't fill a Sienna)
+    const fam=CODE_TO_MODEL[u.code]; if(!fam) return;
     ORDERS.forEach(o=>{
-      const ln=o.lastName.toUpperCase().replace(/[^A-Z]/g,'');
-      if(ln.length<3) return;
-      const blob=u.nameBlob.replace(/[^A-Z ]/g,' ');
-      if(new RegExp('(^|\\s)'+ln+'(\\s|$)').test(blob) || (ln.length>=5&&blob.includes(ln))){
-        u.matches.push(o);
-      }
+      if(o.model!==fam) return;
+      const parts=o.lastName.toUpperCase().split(/[^A-Z]+/).filter(x=>x.length>=3);
+      if(parts.some(ln=>blob.includes(' '+ln+' '))) u.matches.push(o);
     });
-    // prefer same-code matches
+    // prefer same-code matches, then same salesperson
     if(u.matches.length>1 && u.code){ const same=u.matches.filter(o=>o.altCodes.includes(u.code)); if(same.length) u.matches=same; }
+    if(u.matches.length>1 && u.salesInit){ const same=u.matches.filter(o=>o.sales===u.salesInit); if(same.length) u.matches=same; }
   });
 }
 function renderColMap(){
@@ -500,7 +513,7 @@ function render(){
     const dateCell=o.date?`${fmtDate(o.date)} <span class="seq">${daysAgo(o.date)}d</span>`:(o.urgent?`<span class="pill urgent">URGENT</span>`:`<span class="warn" title="Could not read date">${esc(o.rawDate)||'—'}</span>`);
     let flagCell='';
     if(o.flag) flagCell=`<span class="pill flag" title="${esc(o.flag.map(p=>p.lastName+' '+fmtDate(p.date)+' '+p.ext).join(', '))}">⚠ ahead of ${o.flag.length} older open</span>`;
-    else if(st.status==='filled') flagCell='<span class="pill filled">in order</span>';
+    else if(st.status==='filled'||u) flagCell='<span class="pill filled">in order</span>';
     let fillCell=st.stock?esc(st.stock):'';
     if(u) fillCell+=(fillCell?' ':'')+`<span class="pill match" title="Inventory unit names this customer">${esc(u.stock||u.vin||'unit')} ${esc(u.status)}</span>`;
     tr.innerHTML=`
@@ -533,21 +546,27 @@ function renderInventory(){
   const units=unitsForModel(activeModel);
   cnt.textContent=`· ${units.length} units for ${MODELS.find(m=>m.key===activeModel)?.label||''} (${INV.units.length} total)`;
   if(!units.length){el.innerHTML='<div class="muted">No inventory units match this model\'s codes.</div>';return;}
-  const openOrders=ORDERS.filter(o=>o.model===activeModel&&statusOf(o).status==='open'&&o.date).sort((a,b)=>a.date-b.date);
+  const openOrders=ORDERS.filter(o=>o.model===activeModel&&statusOf(o).status==='open'&&!o.unit&&o.date).sort((a,b)=>a.date-b.date);
+  const stOrder={G:0,GP:0,F:1,FI:1,A:2};
+  units.sort((a,b)=>((stOrder[a.status]??3)-(stOrder[b.status]??3))||(a.reserved===b.reserved?0:a.reserved?1:-1)||a.code.localeCompare(b.code));
+  const statusWord=s=>({G:'On lot',GP:'On lot',F:'In transit',FI:'In transit',A:'Allocated'}[s]||s);
   el.innerHTML=units.map(u=>{
     const m=u.matches[0];
     let line;
-    if(m){
+    if(!m && u.reserved){
+      line=`<span class="pill skipped">RESERVED</span> <span class="warn">${u.nameBlob?esc(u.nameBlob)+' — not on the order sheet':'no name in comments'}</span>`;
+    }else if(m){
       const st=statusOf(m);
       const older=openOrders.filter(p=>p!==m&&p.date<(m.date||0)&&p.altCodes.some(c=>u.code?c===u.code:m.altCodes.includes(c)));
-      line=`<span class="pill match">→ ${esc(m.lastName)}</span> ${st.status!=='filled'?`<button class="small" data-fill="${esc(m.key)}" data-stock="${esc(u.stock||u.vin)}">Mark filled</button>`:'<span class="pill filled">FILLED</span>'}`+
+      const diffCode=u.code&&!m.altCodes.includes(u.code)?` <span class="warn">(ordered ${esc(m.codeRaw)})</span>`:'';
+      line=`<span class="pill match">→ ${esc(m.lastName)}</span>${diffCode} ${st.status!=='filled'?`<button class="small" data-fill="${esc(m.key)}" data-stock="${esc(u.stock||u.vin)}">Mark filled</button>`:'<span class="pill filled">FILLED</span>'}`+
         (older.length?` <span class="warn" title="${esc(older.map(p=>p.lastName+' '+fmtDate(p.date)+' '+p.ext).join(', '))}">⚠ ${older.length} older open ${u.code||''} order${older.length>1?'s':''}</span>`:'');
     }else{
       const next=openOrders.filter(p=>p.altCodes.includes(u.code)).slice(0,3);
-      line=`<span class="muted">unassigned</span>`+(next.length?` · next in line: ${next.map(p=>`<span title="${esc(p.ext)} / ${esc(p.int)}">${esc(p.lastName)} ${fmtDate(p.date)}</span>`).join(', ')}`:'');
+      line=`<span class="pill open">AVAILABLE</span>`+(next.length?` · next in line: ${next.map(p=>`<span title="${esc(p.ext)} / ${esc(p.int)}">${esc(p.lastName)} ${fmtDate(p.date)} (${esc(p.ext)})</span>`).join(', ')}`:' · no open orders for this code');
     }
-    return `<div class="invunit"><b>${esc(u.stock||'(no stk)')}</b> ${esc(u.codeRaw)} · ${esc(u.ext)}${u.int?' / '+esc(u.int):''} · ${esc(u.status)}${u.msrp?' · '+esc(u.msrp):''}${u.eta?' · '+esc(u.eta):''}
-      <div class="meta">${[u.res&&'Res: '+u.res,u.presold&&'Presold: '+u.presold,u.comments].filter(Boolean).map(esc).join(' · ')}${u.vin?' · '+esc(u.vin):''}</div>
+    return `<div class="invunit"><b>${esc(u.stock||'(no stk)')}</b> ${esc(u.modelName||'')} ${esc(u.codeRaw)} · ${esc(u.ext)}${u.int?' / '+esc(u.int):''} · <span class="${u.status.startsWith('G')?'pill filled':u.status.startsWith('F')?'pill match':'pill open'}">${esc(statusWord(u.status))}</span>${u.msrp?' · $'+esc(u.msrp):''}${u.dis?' · '+esc(u.dis)+'d':''}
+      <div class="meta">${[u.res&&'Res: '+u.res,u.comments&&'"'+u.comments+'"',u.acc].filter(Boolean).map(esc).join(' · ')}${u.vin?' · '+esc(u.vin):''}</div>
       <div style="margin-top:3px">${line}</div></div>`;
   }).join('');
   el.querySelectorAll('button[data-fill]').forEach(b=>b.onclick=()=>{
@@ -609,7 +628,7 @@ document.getElementById('fileOrders').onchange=async e=>{
 };
 document.getElementById('btnInv').onclick=()=>{const t=document.getElementById('invText').value; if(t.trim()) loadInventory(t);};
 document.getElementById('fileInv').onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(t=>{document.getElementById('invText').value=t;loadInventory(t);}); e.target.value='';};
-document.getElementById('btnInvClear').onclick=()=>{INV=null;document.getElementById('invText').value='';try{localStorage.removeItem(INV_KEY);}catch(e){} renderColMap(); render();};
+document.getElementById('btnInvClear').onclick=()=>{INV=null;document.getElementById('invText').value='';try{localStorage.removeItem(INV_KEY);}catch(e){} renderColMap(); render(); location.reload();};
 document.getElementById('btnPrint').onclick=()=>window.print();
 document.getElementById('btnTogInv').onclick=()=>{const sp=document.querySelector('.split');const hidden=sp.classList.toggle('one');document.getElementById('invpanel').parentElement.style.display=hidden?'none':'';document.getElementById('btnTogInv').textContent=hidden?'Show inventory panel':'Hide inventory panel';};
 ['q','fStatus','fCode','fSales','onlyFlag'].forEach(id=>document.getElementById(id).addEventListener('input',render));
@@ -620,14 +639,22 @@ async function boot(){
   loadStatus();
   let loaded=0;
   await Promise.all(MODELS.map(async m=>{
-    try{ const r=await fetch(m.file,{cache:'no-store'}); if(!r.ok) throw 0; const text=await r.text(); const parsed=ordersFromCSV(m.key,text); ORDERS.push(...parsed); loaded++; }catch(e){}
+    // try data/<MODEL>.csv first, then <MODEL>.csv at the repo root
+    for(const path of [m.file, m.file.replace(/^data\//,'')]){
+      try{ const r=await fetch(path,{cache:'no-store'}); if(!r.ok) continue; const text=await r.text(); if(/<html/i.test(text)) continue; const parsed=ordersFromCSV(m.key,text); ORDERS.push(...parsed); loaded++; break; }catch(e){}
+    }
   }));
   // status.json committed to the repo (optional) — merged, newest wins
   try{ const r=await fetch('status.json',{cache:'no-store'}); if(r.ok){ const j=await r.json(); mergeStatus(j.statuses||j); } }catch(e){}
-  try{ const t=localStorage.getItem(INV_KEY); if(t){document.getElementById('invText').value=t;} }catch(e){}
+  // inventory: repo file first, unless a newer paste/upload is saved in this browser
+  let repoInv=null;
+  try{ const r=await fetch('inventory.csv',{cache:'no-store'}); if(r.ok){ const t=await r.text(); if(!/<html/i.test(t)){ repoInv=t; const lm=r.headers.get('last-modified'); document.getElementById('invsrc').innerHTML=`Inventory from <code>inventory.csv</code> in the repo${lm?' (updated '+new Date(lm).toLocaleDateString()+')':''}. Paste or upload a newer Inventory Summary export below to override in this browser only — commit it as <code>inventory.csv</code> to update it for everyone.`; } } }catch(e){}
   activeModel=(MODELS.find(m=>ORDERS.some(o=>o.model===m.key))||MODELS[0]).key;
-  document.getElementById('srcinfo').textContent=loaded?`${ORDERS.length} orders from ${loaded} CSVs in data/ · ${new Date().toLocaleDateString()}`:'Could not fetch data/*.csv (opening the file directly?) — use "Load order CSVs" to pick the files.';
-  try{ const t=localStorage.getItem(INV_KEY); if(t) loadInventory(t); else render(); }catch(e){ render(); }
+  document.getElementById('srcinfo').textContent=loaded?`${ORDERS.length} orders from ${loaded} CSVs · ${new Date().toLocaleDateString()}`:'Could not fetch the order CSVs (expected data/<MODEL>.csv or <MODEL>.csv next to index.html) — use "Load order CSVs" to pick the files.';
+  let local=null; try{ local=localStorage.getItem(INV_KEY); }catch(e){}
+  if(local) { document.getElementById('invText').value=local; loadInventory(local); }
+  else if(repoInv) loadInventory(repoInv,false);
+  else render();
 }
 boot();
 </script>
