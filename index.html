@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sold Order Tracker — McGrath Toyota</title>
+<style>
+  :root{
+    --red:#EB0A1E; --bg:#0d0d0d; --panel:#161616; --panel2:#1f1f1f; --line:#2c2c2c;
+    --text:#f2f2f2; --muted:#a3a3a3; --green:#2ecc71; --amber:#f5b82e; --blue:#4da3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.35}
+  header{background:#000;border-bottom:3px solid var(--red);padding:14px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+  header h1{margin:0;font-size:18px;letter-spacing:.3px}
+  header h1 span{color:var(--red)}
+  header .sub{color:var(--muted);font-size:12px}
+  .wrap{padding:16px 20px;max-width:1900px;margin:0 auto}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px;display:flex;gap:8px;align-items:center}
+  .tab:hover{border-color:#555}
+  .tab.active{background:var(--red);border-color:var(--red);color:#fff}
+  .tab .cnt{font-size:11px;color:var(--muted)}
+  .tab.active .cnt{color:#ffd9dc}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+  input[type=text],select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px 9px;border-radius:5px;font-family:inherit;font-size:13px}
+  input[type=text]:focus,select:focus,textarea:focus{outline:none;border-color:var(--red)}
+  button{background:var(--panel2);border:1px solid #444;color:var(--text);padding:7px 11px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:13px}
+  button:hover{border-color:#777}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff}
+  button.small{padding:3px 8px;font-size:12px}
+  .tiles{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 14px;min-width:110px}
+  .tile b{display:block;font-size:20px}
+  .tile span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .tile.open b{color:var(--amber)} .tile.filled b{color:var(--green)} .tile.skipped b{color:var(--muted)} .tile.flag b{color:var(--red)}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+  table{border-collapse:collapse;width:100%;min-width:1300px}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+  th{background:#000;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;user-select:none}
+  th.sorted{color:#fff}
+  td.wrapcell{white-space:normal;min-width:180px;max-width:320px}
+  tr.order{cursor:pointer}
+  tr.order:hover td{background:#222}
+  tr.filled td{color:#9fd8b3}
+  tr.skipped td{color:#777;text-decoration:line-through}
+  tr.skipped td.nostrike{text-decoration:none}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;letter-spacing:.3px;text-decoration:none}
+  .pill.open{background:#3b2f0c;color:var(--amber)}
+  .pill.filled{background:#0f3a22;color:var(--green)}
+  .pill.skipped{background:#2a2a2a;color:#999}
+  .pill.flag{background:#4a0d13;color:#ff8a94}
+  .pill.match{background:#0e2a45;color:var(--blue)}
+  .pill.urgent{background:var(--red);color:#fff}
+  .seq{color:var(--muted);font-size:11px}
+  .muted{color:var(--muted)}
+  .warn{color:#ff8a94}
+  .split{display:grid;grid-template-columns:1fr;gap:14px}
+  @media(min-width:1200px){.split.two{grid-template-columns:2fr 1fr}.split.two.one{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
+  .panel h2{margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  .panel h2 span{color:var(--text)}
+  textarea{width:100%;min-height:90px;resize:vertical}
+  .invunit{border-bottom:1px solid var(--line);padding:6px 0;font-size:13px}
+  .invunit:last-child{border-bottom:none}
+  .invunit b{color:#fff}
+  .invunit .meta{color:var(--muted);font-size:12px}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+  .overlay.show{display:flex}
+  .modal{background:var(--panel);border:1px solid #444;border-top:3px solid var(--red);border-radius:8px;width:100%;max-width:560px;padding:18px}
+  .modal h3{margin:0 0 4px;font-size:16px}
+  .modal .sub{color:var(--muted);font-size:12px;margin-bottom:12px}
+  .field{margin-bottom:10px}
+  .field label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .field input[type=text]{width:100%}
+  .statusbtns{display:flex;gap:6px;margin-bottom:12px}
+  .statusbtns button{flex:1}
+  .statusbtns button.sel-open{background:#3b2f0c;border-color:var(--amber);color:var(--amber)}
+  .statusbtns button.sel-filled{background:#0f3a22;border-color:var(--green);color:var(--green)}
+  .statusbtns button.sel-skipped{background:#2a2a2a;border-color:#888;color:#ccc}
+  .modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#000;border:1px solid var(--red);color:#fff;padding:9px 16px;border-radius:6px;font-size:13px;display:none;z-index:60}
+  .toast.show{display:block}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px}
+  .colmap{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  .colmap label{font-size:11px;color:var(--muted)}
+  .colmap select{font-size:12px;padding:4px 6px}
+  footer{color:#666;font-size:11px;padding:20px;text-align:center}
+  @media print{header,.bar,.tabs,.panel,footer{display:none}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>McGrath Toyota <span>|</span> Sold Order Tracker</h1>
+    <div class="sub" id="srcinfo">Loading orders…</div>
+  </div>
+  <div class="bar" style="margin:0">
+    <button id="btnExport" title="Download status.json — commit it to the repo so statuses follow you across devices">Export status.json</button>
+    <label class="tab" style="cursor:pointer">Import status.json <input type="file" id="fileStatus" accept=".json" hidden></label>
+    <label class="tab" style="cursor:pointer">Load order CSVs <input type="file" id="fileOrders" accept=".csv" multiple hidden></label>
+    <button id="btnPrint">Print</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="tabs" id="tabs"></div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="bar">
+    <input type="text" id="q" placeholder="Search name, deal #, color, sales, notes…" style="min-width:260px">
+    <select id="fStatus">
+      <option value="">All statuses</option>
+      <option value="open">Open</option>
+      <option value="filled">Filled</option>
+      <option value="skipped">Skipped</option>
+    </select>
+    <select id="fCode"><option value="">All model codes</option></select>
+    <select id="fSales"><option value="">All sales</option></select>
+    <label class="muted" style="font-size:12px"><input type="checkbox" id="onlyFlag"> Only out-of-order flags</label>
+    <button id="btnTogInv" class="small">Hide inventory panel</button>
+    <span class="muted" id="rowcount" style="margin-left:auto;font-size:12px"></span>
+  </div>
+
+  <div class="split two">
+    <div class="tablewrap">
+      <table id="tbl">
+        <thead><tr>
+          <th data-k="seq" title="Position in date order within this model">#</th>
+          <th data-k="date">Date</th>
+          <th data-k="lastName">Last name</th>
+          <th data-k="status">Status</th>
+          <th data-k="fill">Filled with</th>
+          <th data-k="flag">Order check</th>
+          <th data-k="orderNum">Order #</th>
+          <th data-k="deal">Deal #</th>
+          <th data-k="code">Model</th>
+          <th data-k="secondary">2nd</th>
+          <th data-k="ext">Ext</th>
+          <th data-k="int">Int</th>
+          <th data-k="depo">Depo</th>
+          <th data-k="acc">Accessories</th>
+          <th data-k="pricing">Pricing</th>
+          <th data-k="mgr">Mgr</th>
+          <th data-k="sales">Sales</th>
+          <th data-k="notes">Notes</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div>
+      <div class="panel" id="invpanel">
+        <h2>Inventory cross-reference <span id="invcount"></span></h2>
+        <div class="muted" style="font-size:12px;margin-bottom:8px">Paste or upload the Inventory Summary export (stock #, model, color, status, Res., Presold, Comments). Units are matched to orders by model code and by customer name in Res./Presold/Comments. Nothing is uploaded anywhere — it stays in this browser.</div>
+        <textarea id="invText" placeholder="Paste Inventory Summary CSV here…"></textarea>
+        <div class="bar" style="margin-top:6px">
+          <button class="primary" id="btnInv">Load inventory</button>
+          <label class="tab" style="cursor:pointer">Upload CSV <input type="file" id="fileInv" accept=".csv,.txt" hidden></label>
+          <button id="btnInvClear">Clear</button>
+        </div>
+        <details id="colmapWrap" style="display:none"><summary>Column mapping (auto-detected — adjust if wrong)</summary><div class="colmap" id="colmap"></div></details>
+        <div id="invlist" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <div class="sub" id="mSub"></div>
+    <div class="statusbtns">
+      <button data-s="open" id="sbOpen">Open</button>
+      <button data-s="filled" id="sbFilled">Filled</button>
+      <button data-s="skipped" id="sbSkipped">Skipped</button>
+    </div>
+    <div class="field"><label>Stock # / VIN it was filled with</label><input type="text" id="mStock" placeholder="S262125 or VIN"></div>
+    <div class="field"><label>Date filled / skipped</label><input type="text" id="mDate" placeholder="9/14/2026"></div>
+    <div class="field"><label>Note</label><input type="text" id="mNote" placeholder="Why skipped, color change, etc."></div>
+    <div class="actions">
+      <button id="mCancel">Cancel</button>
+      <button class="primary" id="mSave">Save</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<footer>Statuses are saved in this browser (localStorage). Export status.json and commit it to the repo to share across devices. Order CSVs live in <code>data/</code> — replace them with fresh exports to update.</footer>
+
+<script>
+/* ===================== CONFIG ===================== */
+const MODELS = [
+  {key:'4RUNNER', label:'4Runner', file:'data/4RUNNER.csv'},
+  {key:'CAMRY', label:'Camry', file:'data/CAMRY.csv'},
+  {key:'CROWN', label:'Crown', file:'data/CROWN.csv'},
+  {key:'GRAND_HIGHLANDER', label:'Grand Highlander', file:'data/GRAND_HIGHLANDER.csv'},
+  {key:'HIGHLANDER', label:'Highlander', file:'data/HIGHLANDER.csv'},
+  {key:'SIENNA', label:'Sienna', file:'data/SIENNA.csv'},
+  {key:'TACOMA', label:'Tacoma', file:'data/TACOMA.csv'},
+  {key:'TUNDRA', label:'Tundra', file:'data/TUNDRA.csv'},
+];
+// Optional friendly labels for model codes (add as you confirm them)
+const CODE_LABELS = {
+  '6724':'GH Hybrid Limited','5403':'Sienna LE AWD','5402':'Sienna LE FWD','5406':'Sienna XLE FWD 8-pass','5407':'Sienna XLE AWD',
+  '2560':'Camry XLE','2555':'Camry XLE AWD'
+};
+const DEFAULT_YEAR = 2026;
+const STORAGE_KEY = 'mcgrath-order-status-v1';
+const INV_KEY = 'mcgrath-inventory-v1';
+
+/* ===================== CSV PARSER ===================== */
+function parseCSV(text){
+  const rows=[];let row=[],cur='',inQ=false;
+  text=text.replace(/^﻿/,'');
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQ){
+      if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else inQ=false; }
+      else cur+=c;
+    }else{
+      if(c==='"')inQ=true;
+      else if(c===','){row.push(cur);cur='';}
+      else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n')i++; row.push(cur);rows.push(row);row=[];cur=''; }
+      else cur+=c;
+    }
+  }
+  if(cur!==''||row.length){row.push(cur);rows.push(row);}
+  return rows;
+}
+
+/* ===================== DATE PARSING ===================== */
+function parseDate(s){
+  s=(s||'').trim();
+  if(!s) return null;
+  let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(!m){ // "01/212026" style typo: 2 digits / 6 digits
+    const t=s.match(/^(\d{1,2})\/(\d{2})(\d{4})$/);
+    if(t) m=[null,t[1],t[2],t[3]];
+  }
+  if(!m){ const d=s.match(/^(\d{1,2})\/(\d{1,2})$/); if(d) m=[null,d[1],d[2],String(DEFAULT_YEAR)]; }
+  if(!m) return null;
+  let y=parseInt(m[3],10); if(y<100) y+=2000;
+  const dt=new Date(y,parseInt(m[1],10)-1,parseInt(m[2],10));
+  return isNaN(dt)?null:dt;
+}
+function fmtDate(d){ return d?`${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`:''; }
+function daysAgo(d){ return d?Math.round((Date.now()-d.getTime())/86400000):null; }
+
+/* ===================== ORDER NORMALIZATION ===================== */
+function normHeader(h){ return (h||'').trim().toUpperCase().replace(/\s+/g,' '); }
+function colIndex(headers, names){
+  for(const n of names){ const i=headers.findIndex(h=>h===n||h.startsWith(n)); if(i>=0) return i; }
+  return -1;
+}
+function ordersFromCSV(modelKey, text){
+  const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()!==''));
+  if(!rows.length) return [];
+  const H=rows[0].map(normHeader);
+  // Header row may have blank first cell (Camry) — assume column 0 is date
+  const ix={
+    date: (()=>{const i=colIndex(H,['DATE']); return i>=0?i:0;})(),
+    orderNum: colIndex(H,['ORDER #','ORDER']),
+    lastName: colIndex(H,['LAST NAME','NAME']),
+    deal: colIndex(H,['DEAL #','DEAL']),
+    code: colIndex(H,['MODEL CODE','MODEL']),
+    secondary: colIndex(H,['SECONDARY']),
+    ext: colIndex(H,['EXT COLOR','EXT']),
+    int: colIndex(H,['INT COLOR','INT']),
+    depo: colIndex(H,['DEPO']),
+    acc: colIndex(H,['ACCESORIES','ACCESSORIES','ACC']),
+    pricing: colIndex(H,['PRICING','PRICE']),
+    mgr: colIndex(H,['MGR']),
+    sales: colIndex(H,['SALES']),
+    notes: colIndex(H,['NOTES']),
+  };
+  const g=(r,k)=> ix[k]>=0 ? (r[ix[k]]||'').trim() : '';
+  const out=[];
+  rows.slice(1).forEach((r,n)=>{
+    const lastName=g(r,'lastName');
+    if(!lastName) return; // blank/placeholder rows
+    const rawDate=g(r,'date');
+    const date=parseDate(rawDate);
+    const codeRaw=g(r,'code');
+    const code4=(codeRaw.match(/\d{4}/)||[''])[0];
+    const o={
+      model:modelKey, rowNum:n+2, rawDate, date,
+      urgent:/URGENT|PRIORITY/i.test(rawDate)||/URGENT|PRIORITY/i.test(g(r,'orderNum'))||/PRIORITY #1|URGENT/i.test(g(r,'notes')),
+      orderNum:g(r,'orderNum'), lastName, deal:g(r,'deal'), codeRaw, code:code4,
+      secondary:g(r,'secondary'), ext:g(r,'ext'), int:g(r,'int'), depo:g(r,'depo'),
+      acc:g(r,'acc'), pricing:g(r,'pricing'), mgr:g(r,'mgr').toUpperCase(), sales:g(r,'sales').toUpperCase(), notes:g(r,'notes'),
+    };
+    o.key=[modelKey,o.orderNum,lastName.toUpperCase().replace(/\s+/g,' '),o.deal].join('|');
+    o.altCodes=[o.code].concat((o.secondary.match(/\d{4}/g)||[]),(o.codeRaw.match(/\d{4}/g)||[])).filter((c,i,a)=>c&&a.indexOf(c)===i);
+    out.push(o);
+  });
+  return out;
+}
+
+/* ===================== STATE ===================== */
+let ORDERS=[];            // all orders across models
+let STATUS={};            // key -> {status, stock, date, note, updated}
+let INV=null;             // {units:[], map:{}, headers:[]}
+let activeModel=null;
+let sortKey='seq', sortDir=1;
+
+function loadStatus(){ try{STATUS=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');}catch(e){STATUS={};} }
+function saveStatus(){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(STATUS));}catch(e){} }
+function mergeStatus(incoming){
+  let n=0;
+  for(const k in incoming){
+    const a=STATUS[k], b=incoming[k];
+    if(!a || (b.updated||0)>(a.updated||0)){ STATUS[k]=b; n++; }
+  }
+  saveStatus(); return n;
+}
+function statusOf(o){
+  const s=STATUS[o.key];
+  if(s) return s;
+  if(/\bSKIP/i.test(o.notes)) return {status:'skipped',note:'From notes: '+o.notes,seeded:true};
+  return {status:'open'};
+}
+
+/* ===================== ORDER-SEQUENCE CHECK ===================== */
+// For each model, sort by date; a filled order is flagged if an OLDER order with an overlapping model code is still open.
+function computeSeq(){
+  MODELS.forEach(m=>{
+    const list=ORDERS.filter(o=>o.model===m.key);
+    list.sort((a,b)=>{
+      if(a.urgent!==b.urgent) return a.urgent?-1:1;
+      if(!a.date&&!b.date) return a.rowNum-b.rowNum;
+      if(!a.date) return 1; if(!b.date) return -1;
+      return a.date-b.date || a.rowNum-b.rowNum;
+    });
+    list.forEach((o,i)=>o.seq=i+1);
+    list.forEach(o=>{
+      const st=statusOf(o).status;
+      o.flag=null;
+      if(st!=='filled'||!o.date) return;
+      const older=list.filter(p=>p!==o && statusOf(p).status==='open' && p.date && p.date<o.date && p.altCodes.some(c=>o.altCodes.includes(c)));
+      if(older.length) o.flag=older;
+    });
+  });
+}
+
+/* ===================== INVENTORY ===================== */
+const INV_FIELDS=[
+  ['stock',['STOCK','STK','STOCK #','STOCK NO']],
+  ['code',['MODEL CODE','MODEL','MDL','SERIES']],
+  ['ext',['EXT COLOR','EXT','EXTERIOR','COLOR']],
+  ['int',['INT COLOR','INT','INTERIOR']],
+  ['status',['STATUS','STAT','LOC']],
+  ['res',['RES.','RES','RESERVED']],
+  ['presold',['PRESOLD','PRE-SOLD','SOLD TO']],
+  ['comments',['COMMENTS','COMMENT','NOTES','REMARKS']],
+  ['vin',['VIN']],
+  ['msrp',['MSRP','PRICE','TOTAL MSRP']],
+  ['eta',['ETA','ARRIVAL','DATE']],
+];
+function detectInvColumns(H){
+  const map={};
+  INV_FIELDS.forEach(([f,names])=>{
+    let i=-1;
+    for(const n of names){ i=H.findIndex(h=>h===n); if(i>=0)break; }
+    if(i<0) for(const n of names){ i=H.findIndex(h=>h.includes(n)); if(i>=0)break; }
+    map[f]=i;
+  });
+  return map;
+}
+function loadInventory(text){
+  const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()!==''));
+  if(rows.length<2){ toast('No inventory rows found'); return; }
+  // find header row: first row that contains a recognizable header
+  let hi=rows.findIndex(r=>{const H=r.map(normHeader); return H.some(h=>/STOCK|MODEL|VIN/.test(h));});
+  if(hi<0) hi=0;
+  const H=rows[hi].map(normHeader);
+  INV={headers:H, map:detectInvColumns(H), rows:rows.slice(hi+1), raw:text};
+  try{localStorage.setItem(INV_KEY,text);}catch(e){}
+  buildInvUnits(); renderColMap(); render();
+}
+function buildInvUnits(){
+  if(!INV) return;
+  const m=INV.map, g=(r,f)=>m[f]>=0?(r[m[f]]||'').trim():'';
+  INV.units=INV.rows.map((r,i)=>{
+    const codeRaw=g(r,'code');
+    const u={i, stock:g(r,'stock'), codeRaw, code:(codeRaw.match(/\d{4}/)||[''])[0], ext:g(r,'ext'), int:g(r,'int'),
+      status:g(r,'status'), res:g(r,'res'), presold:g(r,'presold'), comments:g(r,'comments'), vin:g(r,'vin'), msrp:g(r,'msrp'), eta:g(r,'eta'), raw:r};
+    u.nameBlob=(u.res+' '+u.presold+' '+u.comments).toUpperCase();
+    return u;
+  }).filter(u=>u.stock||u.code||u.vin);
+  // match units to orders by last name appearing in Res/Presold/Comments (and same model code family when possible)
+  INV.units.forEach(u=>{
+    u.matches=[];
+    if(!u.nameBlob.trim()) return;
+    ORDERS.forEach(o=>{
+      const ln=o.lastName.toUpperCase().replace(/[^A-Z]/g,'');
+      if(ln.length<3) return;
+      const blob=u.nameBlob.replace(/[^A-Z ]/g,' ');
+      if(new RegExp('(^|\\s)'+ln+'(\\s|$)').test(blob) || (ln.length>=5&&blob.includes(ln))){
+        u.matches.push(o);
+      }
+    });
+    // prefer same-code matches
+    if(u.matches.length>1 && u.code){ const same=u.matches.filter(o=>o.altCodes.includes(u.code)); if(same.length) u.matches=same; }
+  });
+}
+function renderColMap(){
+  const wrap=document.getElementById('colmapWrap'), el=document.getElementById('colmap');
+  if(!INV){wrap.style.display='none';return;}
+  wrap.style.display='block'; el.innerHTML='';
+  INV_FIELDS.forEach(([f])=>{
+    const lab=document.createElement('label'); lab.textContent=f+' ';
+    const sel=document.createElement('select');
+    sel.innerHTML='<option value="-1">—</option>'+INV.headers.map((h,i)=>`<option value="${i}" ${INV.map[f]===i?'selected':''}>${esc(h||'(col '+(i+1)+')')}</option>`).join('');
+    sel.onchange=()=>{INV.map[f]=parseInt(sel.value,10);buildInvUnits();render();};
+    lab.appendChild(sel); el.appendChild(lab);
+  });
+}
+function unitsForModel(modelKey){
+  if(!INV) return [];
+  const codes=new Set(); ORDERS.filter(o=>o.model===modelKey).forEach(o=>o.altCodes.forEach(c=>codes.add(c)));
+  return INV.units.filter(u=>(u.code&&codes.has(u.code)) || u.matches.some(o=>o.model===modelKey));
+}
+function unitForOrder(o){
+  if(!INV) return null;
+  return INV.units.find(u=>u.matches.includes(o))||null;
+}
+
+/* ===================== RENDER ===================== */
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2500);}
+
+function renderTabs(){
+  const el=document.getElementById('tabs'); el.innerHTML='';
+  MODELS.forEach(m=>{
+    const list=ORDERS.filter(o=>o.model===m.key);
+    const open=list.filter(o=>statusOf(o).status==='open').length;
+    const flags=list.filter(o=>o.flag).length;
+    const b=document.createElement('button'); b.className='tab'+(activeModel===m.key?' active':'');
+    b.innerHTML=`${esc(m.label)} <span class="cnt">${open} open / ${list.length}${flags?` · <span class="warn">⚠${flags}</span>`:''}</span>`;
+    b.onclick=()=>{activeModel=m.key;document.getElementById('fCode').value='';render();};
+    el.appendChild(b);
+  });
+}
+function renderTiles(list){
+  const c={open:0,filled:0,skipped:0};
+  list.forEach(o=>c[statusOf(o).status]++);
+  const flags=list.filter(o=>o.flag).length;
+  const openDated=list.filter(o=>statusOf(o).status==='open'&&o.date);
+  const oldest=openDated.length?openDated.reduce((a,b)=>a.date<b.date?a:b):null;
+  document.getElementById('tiles').innerHTML=`
+    <div class="tile"><b>${list.length}</b><span>Orders</span></div>
+    <div class="tile open"><b>${c.open}</b><span>Open</span></div>
+    <div class="tile filled"><b>${c.filled}</b><span>Filled</span></div>
+    <div class="tile skipped"><b>${c.skipped}</b><span>Skipped</span></div>
+    <div class="tile flag"><b>${flags}</b><span>Out of order</span></div>
+    ${oldest?`<div class="tile"><b>${daysAgo(oldest.date)}d</b><span>Oldest open · ${esc(oldest.lastName)} ${fmtDate(oldest.date)}</span></div>`:''}
+    ${INV?`<div class="tile"><b>${unitsForModel(activeModel).length}</b><span>Inventory units</span></div>`:''}`;
+}
+function fillSelects(list){
+  const fc=document.getElementById('fCode'), fs=document.getElementById('fSales');
+  const curC=fc.value, curS=fs.value;
+  const codes=[...new Set(list.map(o=>o.code).filter(Boolean))].sort();
+  fc.innerHTML='<option value="">All model codes</option>'+codes.map(c=>`<option value="${c}">${c}${CODE_LABELS[c]?' · '+esc(CODE_LABELS[c]):''}</option>`).join('');
+  fc.value=codes.includes(curC)?curC:'';
+  const sales=[...new Set(ORDERS.map(o=>o.sales).filter(Boolean))].sort();
+  fs.innerHTML='<option value="">All sales</option>'+sales.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  fs.value=sales.includes(curS)?curS:'';
+}
+function render(){
+  computeSeq();
+  renderTabs();
+  const all=ORDERS.filter(o=>o.model===activeModel);
+  fillSelects(all);
+  renderTiles(all);
+  const q=document.getElementById('q').value.trim().toUpperCase();
+  const fS=document.getElementById('fStatus').value, fC=document.getElementById('fCode').value, fSales=document.getElementById('fSales').value, onlyFlag=document.getElementById('onlyFlag').checked;
+  let list=all.filter(o=>{
+    const st=statusOf(o);
+    if(fS&&st.status!==fS) return false;
+    if(fC&&!o.altCodes.includes(fC)) return false;
+    if(fSales&&o.sales!==fSales) return false;
+    if(onlyFlag&&!o.flag) return false;
+    if(q){ const blob=[o.lastName,o.deal,o.ext,o.int,o.sales,o.mgr,o.notes,o.acc,o.codeRaw,o.orderNum,st.stock,st.note].join(' ').toUpperCase(); if(!blob.includes(q)) return false; }
+    return true;
+  });
+  const val=o=>{ const st=statusOf(o); switch(sortKey){
+    case 'date': return o.date?o.date.getTime():(o.urgent?-1:9e15);
+    case 'status': return st.status; case 'fill': return st.stock||''; case 'flag': return o.flag?o.flag.length:0;
+    case 'orderNum': return parseInt(o.orderNum,10)||9e9; default: return o[sortKey]??''; } };
+  list.sort((a,b)=>{const x=val(a),y=val(b); return (x<y?-1:x>y?1:0)*sortDir || a.seq-b.seq;});
+  document.querySelectorAll('th').forEach(th=>th.classList.toggle('sorted',th.dataset.k===sortKey));
+  document.getElementById('rowcount').textContent=`${list.length} of ${all.length} shown`;
+  const tb=document.getElementById('tbody'); tb.innerHTML='';
+  list.forEach(o=>{
+    const st=statusOf(o); const u=unitForOrder(o);
+    const tr=document.createElement('tr'); tr.className='order '+st.status; tr.dataset.key=o.key;
+    const dateCell=o.date?`${fmtDate(o.date)} <span class="seq">${daysAgo(o.date)}d</span>`:(o.urgent?`<span class="pill urgent">URGENT</span>`:`<span class="warn" title="Could not read date">${esc(o.rawDate)||'—'}</span>`);
+    let flagCell='';
+    if(o.flag) flagCell=`<span class="pill flag" title="${esc(o.flag.map(p=>p.lastName+' '+fmtDate(p.date)+' '+p.ext).join(', '))}">⚠ ahead of ${o.flag.length} older open</span>`;
+    else if(st.status==='filled') flagCell='<span class="pill filled">in order</span>';
+    let fillCell=st.stock?esc(st.stock):'';
+    if(u) fillCell+=(fillCell?' ':'')+`<span class="pill match" title="Inventory unit names this customer">${esc(u.stock||u.vin||'unit')} ${esc(u.status)}</span>`;
+    tr.innerHTML=`
+      <td class="nostrike"><span class="seq">${o.seq}</span></td>
+      <td class="nostrike">${dateCell}</td>
+      <td><b>${esc(o.lastName)}</b></td>
+      <td class="nostrike"><span class="pill ${st.status}">${st.status.toUpperCase()}</span>${st.date?`<div class="seq">${esc(st.date)}</div>`:''}</td>
+      <td class="nostrike">${fillCell}</td>
+      <td class="nostrike">${flagCell}</td>
+      <td>${esc(o.orderNum)}</td>
+      <td>${esc(o.deal)}</td>
+      <td title="${esc(CODE_LABELS[o.code]||'')}">${esc(o.codeRaw)}</td>
+      <td>${esc(o.secondary)}</td>
+      <td>${esc(o.ext)}</td>
+      <td>${esc(o.int)}</td>
+      <td>${esc(o.depo)}</td>
+      <td class="wrapcell">${esc(o.acc)}</td>
+      <td>${esc(o.pricing)}</td>
+      <td>${esc(o.mgr)}</td>
+      <td>${esc(o.sales)}</td>
+      <td class="wrapcell">${esc(o.notes)}${st.note&&!st.seeded?`<div class="muted">↳ ${esc(st.note)}</div>`:''}</td>`;
+    tr.onclick=()=>openModal(o);
+    tb.appendChild(tr);
+  });
+  renderInventory();
+}
+function renderInventory(){
+  const el=document.getElementById('invlist'), cnt=document.getElementById('invcount');
+  if(!INV){el.innerHTML='';cnt.textContent='';return;}
+  const units=unitsForModel(activeModel);
+  cnt.textContent=`· ${units.length} units for ${MODELS.find(m=>m.key===activeModel)?.label||''} (${INV.units.length} total)`;
+  if(!units.length){el.innerHTML='<div class="muted">No inventory units match this model\'s codes.</div>';return;}
+  const openOrders=ORDERS.filter(o=>o.model===activeModel&&statusOf(o).status==='open'&&o.date).sort((a,b)=>a.date-b.date);
+  el.innerHTML=units.map(u=>{
+    const m=u.matches[0];
+    let line;
+    if(m){
+      const st=statusOf(m);
+      const older=openOrders.filter(p=>p!==m&&p.date<(m.date||0)&&p.altCodes.some(c=>u.code?c===u.code:m.altCodes.includes(c)));
+      line=`<span class="pill match">→ ${esc(m.lastName)}</span> ${st.status!=='filled'?`<button class="small" data-fill="${esc(m.key)}" data-stock="${esc(u.stock||u.vin)}">Mark filled</button>`:'<span class="pill filled">FILLED</span>'}`+
+        (older.length?` <span class="warn" title="${esc(older.map(p=>p.lastName+' '+fmtDate(p.date)+' '+p.ext).join(', '))}">⚠ ${older.length} older open ${u.code||''} order${older.length>1?'s':''}</span>`:'');
+    }else{
+      const next=openOrders.filter(p=>p.altCodes.includes(u.code)).slice(0,3);
+      line=`<span class="muted">unassigned</span>`+(next.length?` · next in line: ${next.map(p=>`<span title="${esc(p.ext)} / ${esc(p.int)}">${esc(p.lastName)} ${fmtDate(p.date)}</span>`).join(', ')}`:'');
+    }
+    return `<div class="invunit"><b>${esc(u.stock||'(no stk)')}</b> ${esc(u.codeRaw)} · ${esc(u.ext)}${u.int?' / '+esc(u.int):''} · ${esc(u.status)}${u.msrp?' · '+esc(u.msrp):''}${u.eta?' · '+esc(u.eta):''}
+      <div class="meta">${[u.res&&'Res: '+u.res,u.presold&&'Presold: '+u.presold,u.comments].filter(Boolean).map(esc).join(' · ')}${u.vin?' · '+esc(u.vin):''}</div>
+      <div style="margin-top:3px">${line}</div></div>`;
+  }).join('');
+  el.querySelectorAll('button[data-fill]').forEach(b=>b.onclick=()=>{
+    const o=ORDERS.find(x=>x.key===b.dataset.fill); if(!o) return;
+    STATUS[o.key]={status:'filled',stock:b.dataset.stock,date:fmtDate(new Date()),note:'',updated:Date.now()};
+    saveStatus(); render(); toast(`${o.lastName} marked filled with ${b.dataset.stock}`);
+  });
+}
+
+/* ===================== MODAL ===================== */
+let modalOrder=null, modalStatus='open';
+function openModal(o){
+  modalOrder=o; const st=statusOf(o); modalStatus=st.status;
+  document.getElementById('mTitle').textContent=`${o.lastName} — ${o.codeRaw} ${o.ext}${o.int?' / '+o.int:''}`;
+  document.getElementById('mSub').textContent=`${MODELS.find(m=>m.key===o.model).label} · ordered ${o.date?fmtDate(o.date):(o.rawDate||'no date')} · order #${o.orderNum||'—'} · deal ${o.deal||'—'} · ${o.sales||''}`;
+  document.getElementById('mStock').value=st.stock||'';
+  document.getElementById('mDate').value=st.date||'';
+  document.getElementById('mNote').value=st.seeded?'':(st.note||'');
+  paintStatusBtns();
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('mStock').focus();
+}
+function paintStatusBtns(){
+  ['open','filled','skipped'].forEach(s=>{const b=document.querySelector(`.statusbtns [data-s=${s}]`); b.className=modalStatus===s?'sel-'+s:'';});
+}
+document.querySelectorAll('.statusbtns button').forEach(b=>b.onclick=()=>{modalStatus=b.dataset.s;paintStatusBtns(); if(modalStatus!=='open'&&!document.getElementById('mDate').value) document.getElementById('mDate').value=fmtDate(new Date());});
+document.getElementById('mCancel').onclick=()=>document.getElementById('overlay').classList.remove('show');
+document.getElementById('overlay').onclick=e=>{if(e.target.id==='overlay')document.getElementById('overlay').classList.remove('show');};
+document.getElementById('mSave').onclick=()=>{
+  if(!modalOrder) return;
+  const rec={status:modalStatus,stock:document.getElementById('mStock').value.trim(),date:document.getElementById('mDate').value.trim(),note:document.getElementById('mNote').value.trim(),updated:Date.now()};
+  if(rec.status==='open'&&!rec.stock&&!rec.note&&!rec.date) delete STATUS[modalOrder.key]; else STATUS[modalOrder.key]=rec;
+  saveStatus(); document.getElementById('overlay').classList.remove('show'); render();
+};
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('overlay').classList.remove('show'); if(e.key==='Enter'&&document.getElementById('overlay').classList.contains('show')&&e.target.tagName==='INPUT') document.getElementById('mSave').click(); });
+
+/* ===================== IMPORT / EXPORT ===================== */
+document.getElementById('btnExport').onclick=()=>{
+  const blob=new Blob([JSON.stringify({exported:new Date().toISOString(),statuses:STATUS},null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='status.json'; a.click();
+};
+document.getElementById('fileStatus').onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  f.text().then(t=>{ try{const j=JSON.parse(t); const n=mergeStatus(j.statuses||j); render(); toast(`Imported ${n} status update${n===1?'':'s'}`);}catch(err){toast('Not a valid status.json');} });
+  e.target.value='';
+};
+document.getElementById('fileOrders').onchange=async e=>{
+  let n=0;
+  for(const f of e.target.files){
+    const name=f.name.toUpperCase().replace(/\.CSV$/,'');
+    const m=MODELS.find(m=>name.includes(m.key)||name.replace(/[\s_-]/g,'').includes(m.key.replace(/_/g,'')));
+    if(!m){toast(`Couldn't tell which model ${f.name} is`);continue;}
+    const text=await f.text();
+    ORDERS=ORDERS.filter(o=>o.model!==m.key).concat(ordersFromCSV(m.key,text)); n++;
+  }
+  if(INV) buildInvUnits();
+  document.getElementById('srcinfo').textContent=`Orders loaded from ${n} local file${n===1?'':'s'} · ${ORDERS.length} orders`;
+  render(); e.target.value='';
+};
+document.getElementById('btnInv').onclick=()=>{const t=document.getElementById('invText').value; if(t.trim()) loadInventory(t);};
+document.getElementById('fileInv').onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(t=>{document.getElementById('invText').value=t;loadInventory(t);}); e.target.value='';};
+document.getElementById('btnInvClear').onclick=()=>{INV=null;document.getElementById('invText').value='';try{localStorage.removeItem(INV_KEY);}catch(e){} renderColMap(); render();};
+document.getElementById('btnPrint').onclick=()=>window.print();
+document.getElementById('btnTogInv').onclick=()=>{const sp=document.querySelector('.split');const hidden=sp.classList.toggle('one');document.getElementById('invpanel').parentElement.style.display=hidden?'none':'';document.getElementById('btnTogInv').textContent=hidden?'Show inventory panel':'Hide inventory panel';};
+['q','fStatus','fCode','fSales','onlyFlag'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+document.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{ if(sortKey===th.dataset.k) sortDir*=-1; else {sortKey=th.dataset.k;sortDir=1;} render(); });
+
+/* ===================== BOOT ===================== */
+async function boot(){
+  loadStatus();
+  let loaded=0;
+  await Promise.all(MODELS.map(async m=>{
+    try{ const r=await fetch(m.file,{cache:'no-store'}); if(!r.ok) throw 0; const text=await r.text(); const parsed=ordersFromCSV(m.key,text); ORDERS.push(...parsed); loaded++; }catch(e){}
+  }));
+  // status.json committed to the repo (optional) — merged, newest wins
+  try{ const r=await fetch('status.json',{cache:'no-store'}); if(r.ok){ const j=await r.json(); mergeStatus(j.statuses||j); } }catch(e){}
+  try{ const t=localStorage.getItem(INV_KEY); if(t){document.getElementById('invText').value=t;} }catch(e){}
+  activeModel=(MODELS.find(m=>ORDERS.some(o=>o.model===m.key))||MODELS[0]).key;
+  document.getElementById('srcinfo').textContent=loaded?`${ORDERS.length} orders from ${loaded} CSVs in data/ · ${new Date().toLocaleDateString()}`:'Could not fetch data/*.csv (opening the file directly?) — use "Load order CSVs" to pick the files.';
+  try{ const t=localStorage.getItem(INV_KEY); if(t) loadInventory(t); else render(); }catch(e){ render(); }
+}
+boot();
+</script>
+</body>
+</html>
