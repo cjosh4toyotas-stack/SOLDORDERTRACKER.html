@@ -38,6 +38,7 @@
   .trimrow .tn{font-size:13px;font-weight:bold} .trimrow .tn span{color:var(--muted);font-size:11px;margin-left:5px;font-weight:normal}
   .trimrow .tw{font-size:20px;font-weight:bold;white-space:nowrap;text-align:right} .trimrow .tw small{font-size:11px;color:var(--muted);font-weight:normal;margin-left:4px}
   .trimrow .tw.est{color:var(--muted)}
+  .trimrow .tw.now{color:var(--green)} .trimrow .tw.soon{color:var(--blue)}
   .trimrow .tr{grid-column:1/3;color:var(--muted);font-size:11px;margin-top:1px}
   .back{background:var(--panel2);border:1px solid #444;color:var(--text);padding:7px 11px;border-radius:5px;cursor:pointer;font-size:13px;margin-bottom:12px}
   #detail{display:none}
@@ -94,6 +95,8 @@ const MODELS=[
   {key:'CROWN',label:'Crown',file:'CROWN.csv'},
 ];
 const DEFAULT_YEAR=2026, MAX_WAIT_DAYS=900;
+// Approximate days to arrival for unreserved inventory, by Inventory Summary Cat. (edit as experience dictates)
+const ETA_DAYS={F:14, A:45};   // F = in transit, A = allocated / scheduled for production; G = on the lot (no wait)
 const STOP=new Set(['COUNTY','TRUST','FAMILY','LLC','INC','THE','REVOCABLE','LIVING','AND','SERVICE','SERVICES','CORP','JOINT','TEAM']);
 
 function parseCSV(text){const rows=[];let row=[],cur='',q=false;text=text.replace(/^﻿/,'');for(let i=0;i<text.length;i++){const c=text[i];if(q){if(c==='"'){if(text[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=c;}else{if(c==='"')q=true;else if(c===','){row.push(cur);cur='';}else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cur);rows.push(row);row=[];cur='';}else cur+=c;}}if(cur!==''||row.length){row.push(cur);rows.push(row);}return rows;}
@@ -192,19 +195,34 @@ function estimate(code,modelKey){
   if(m.length) return {wk:median(m),n:0,lo:pct(m,.25),hi:pct(m,.75),basis:'model'};
   return null;
 }
+// Unreserved inventory for a trim code: on lot / in transit / allocated
+function avail(code){
+  const u=UNITS.filter(x=>x.code===code&&!x.reserved);
+  return {g:u.filter(x=>/^G/.test(x.cat)).length,f:u.filter(x=>/^F/.test(x.cat)).length,a:u.filter(x=>/^A/.test(x.cat)).length,n:u.length};
+}
 function renderOverview(){
   const el=document.getElementById('overview');const now=new Date();
   el.innerHTML='<div class="models">'+MODELS.filter(m=>ORDERS.some(o=>o.model===m.key)).map(m=>{
     const list=ORDERS.filter(o=>o.model===m.key);const done=list.filter(o=>o.sale);const open=list.filter(o=>!o.sale&&!o.skipped&&o.date);
     const codes=[...new Set(list.map(o=>o.code).filter(Boolean))].map(c=>({c,e:estimate(c,m.key),n:done.filter(o=>o.code===c).length,w:open.filter(o=>o.code===c).length}))
-      .sort((a,b)=>(b.n+b.w)-(a.n+a.w));
+      .sort((a,b)=>(b.w-a.w)||(b.n-a.n));
     const mm=median(done.map(o=>o.wait));
     return `<div class="mbox" data-m="${m.key}"><h3>${esc(m.label)}</h3><div class="msub">${mm!=null?'typical '+wk(mm)+' wks · ':''}${done.length} delivered · ${open.length} waiting</div>
-      ${codes.map(t=>{const e=t.e;const big=e?(e.wk<21?'~'+Math.round(e.wk)+'<small>days</small>':'~'+Math.round(e.wk/7)+'<small>wks</small>'):'—';
-        return `<div class="trimrow"><div class="tn">${esc(trimName(t.c))}<span>${t.c}</span></div>
-        <div class="tw${e&&e.basis==='model'?' est':''}">${big}</div>
-        <div class="tr">${e?(e.basis==='model'?'no deliveries yet — model average':(e.n+' delivered'+(e.n>=3?' · usually '+wk(e.lo)+'–'+wk(e.hi)+' wks':' · '+Math.round(e.wk)+' days'))):'no data'}${t.w?' · '+t.w+' waiting':''}</div></div>`;}).join('')}</div>`;
-  }).join('')+'</div><div class="note" style="margin-top:12px">Weeks from order date to RDR, median of matched deliveries. Click a model for the trend, who is waiting, and every matched order.</div>';
+      ${codes.map(t=>{const e=t.e;const av=avail(t.c);
+        let big,cls='',line;
+        const hist=e?(e.basis==='model'?'no deliveries yet — model average':(e.n+' delivered'+(e.n>=3?' · usually '+wk(e.lo)+'–'+wk(e.hi)+' wks':' · '+Math.round(e.wk)+' days'))):'no data';
+        const stock=[av.g?av.g+' in stock':'',av.f?av.f+' in transit':'',av.a?av.a+' allocated':''].filter(Boolean).join(', ');
+        if(!t.w){ // no open orders — availability decides
+          if(av.g){big='No wait';cls=' now';line='No open orders · '+stock;}
+          else if(av.f){big='~'+ETA_DAYS.F+'<small>days</small>';cls=' soon';line='No open orders · '+stock+' · approx. arrival';}
+          else if(av.a){big='~'+Math.round(ETA_DAYS.A/7)+'<small>wks</small>';cls=' soon';line='No open orders · '+stock+' · approx. arrival';}
+          else {big=e?(e.wk<21?'~'+Math.round(e.wk)+'<small>days</small>':'~'+Math.round(e.wk/7)+'<small>wks</small>'):'—';cls=' est';line='No open orders · none in stock or inbound · if ordered: '+hist;}
+        }else{
+          big=e?(e.wk<21?'~'+Math.round(e.wk)+'<small>days</small>':'~'+Math.round(e.wk/7)+'<small>wks</small>'):'—';cls=e&&e.basis==='model'?' est':'';
+          line=hist+' · '+t.w+' waiting'+(av.n?' · '+stock+' unreserved':'');
+        }
+        return `<div class="trimrow"><div class="tn">${esc(trimName(t.c))}<span>${t.c}</span></div><div class="tw${cls}">${big}</div><div class="tr">${line}</div></div>`;}).join('')}</div>`;
+  }).join('')+`</div><div class="note" style="margin-top:12px">Weeks from order date to RDR, median of matched deliveries. Trims with no open orders show inventory instead: <span style="color:var(--green)">No wait</span> = unreserved unit on the lot; <span style="color:var(--blue)">blue</span> = unreserved unit inbound (in transit ≈ ${ETA_DAYS.F} days, allocated ≈ ${Math.round(ETA_DAYS.A/7)} weeks). Click a model for the trend, who is waiting, and every matched order.</div>`;
   el.querySelectorAll('.mbox').forEach(b=>b.onclick=()=>{active=b.dataset.m;showDetail(true);render();});
 }
 function showDetail(on){document.getElementById('detail').style.display=on?'block':'none';document.getElementById('overview').style.display=on?'none':'block';if(!on)window.scrollTo(0,0);}
