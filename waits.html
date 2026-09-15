@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order Wait Times — McGrath Toyota</title>
+<style>
+  :root{--red:#EB0A1E;--bg:#0d0d0d;--panel:#161616;--panel2:#1f1f1f;--line:#2c2c2c;--text:#f2f2f2;--muted:#a3a3a3;--green:#2ecc71;--amber:#f5b82e;--blue:#4da3ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.35}
+  header{background:#000;border-bottom:3px solid var(--red);padding:14px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+  header h1{margin:0;font-size:18px} header h1 span{color:var(--red)} header .sub{color:var(--muted);font-size:12px}
+  header a{color:var(--text);text-decoration:none;border:1px solid #444;padding:7px 11px;border-radius:5px;font-size:13px;background:var(--panel2)}
+  .wrap{padding:16px 20px;max-width:1500px;margin:0 auto}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+  .tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px}
+  .tab.active{background:var(--red);border-color:var(--red);color:#fff}
+  .tab .cnt{font-size:11px;color:var(--muted)} .tab.active .cnt{color:#ffd9dc}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:18px 0 8px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--red);border-radius:6px;padding:12px 14px}
+  .card .trim{font-weight:bold;font-size:15px} .card .code{color:var(--muted);font-size:12px;margin-left:6px}
+  .card .big{font-size:30px;font-weight:bold;margin:6px 0 2px;line-height:1}
+  .card .big small{font-size:13px;color:var(--muted);font-weight:normal;margin-left:6px}
+  .card .range{color:var(--muted);font-size:12px}
+  .card .row{display:flex;gap:14px;margin-top:10px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .card .row b{color:var(--text);font-size:13px;display:block}
+  .card.thin{border-left-color:#555}
+  .card .bar{height:6px;background:#2a2a2a;border-radius:3px;margin-top:10px;position:relative;overflow:hidden}
+  .card .bar i{position:absolute;top:0;bottom:0;background:var(--red);border-radius:3px}
+  .card .bar i.q{background:#5a1b21}
+  .note{color:var(--muted);font-size:12px;margin:6px 0 0}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
+  svg text{font-family:Arial,Helvetica,sans-serif}
+  .tip{position:fixed;pointer-events:none;background:#000;border:1px solid #444;border-radius:5px;padding:6px 9px;font-size:12px;display:none;z-index:9}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;background:#000;cursor:pointer}
+  td.r,th.r{text-align:right}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+  .pill.g{background:#0f3a22;color:var(--green)} .pill.a{background:#3b2f0c;color:var(--amber)} .pill.b{background:#0e2a45;color:var(--blue)} .pill.m{background:#2a2a2a;color:#999}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:8px}
+  footer{color:#666;font-size:11px;padding:20px;text-align:center}
+  @media print{header a,.tabs{display:none}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>McGrath Toyota <span>|</span> Order Wait Times</h1><div class="sub" id="srcinfo">Loading…</div></div>
+  <div style="display:flex;gap:8px"><a href="index.html">Order tracker</a><a href="#" onclick="window.print();return false">Print</a></div>
+</header>
+<div class="wrap">
+  <div class="tabs" id="tabs"></div>
+  <div id="summary"></div>
+  <h2>Typical wait by trim <span style="text-transform:none;letter-spacing:0">— order date to RDR, matched from the Sales Summary</span></h2>
+  <div class="cards" id="cards"></div>
+  <h2>Wait time over time <span style="text-transform:none;letter-spacing:0" id="chartsub"></span></h2>
+  <div class="panel"><div id="chart"></div></div>
+  <h2>Still waiting <span style="text-transform:none;letter-spacing:0">— open orders by trim, no RDR yet</span></h2>
+  <div class="cards" id="waiting"></div>
+  <details><summary>Show every matched order (order → RDR)</summary>
+    <div class="tablewrap" style="margin-top:8px"><table id="tbl"><thead><tr><th>Trim ordered</th><th>Customer</th><th>Ordered</th><th>RDR'd</th><th class="r">Days</th><th>Delivered as</th><th>Sales</th></tr></thead><tbody></tbody></table></div>
+  </details>
+</div>
+<div class="tip" id="tip"></div>
+<footer>Wait = order date on the sold-order sheet → Date of Sale (RDR) in the Sales Summary, matched by customer name within the model family. Typical = median; range = middle half (25th–75th percentile). Approximate — the order sheets and sales report are hand-kept.</footer>
+
+<script>
+const MODELS=[
+  {key:'RAV4',label:'RAV4',file:'RAV4.csv'},
+  {key:'GRAND_HIGHLANDER',label:'Grand Highlander',file:'GRAND_HIGHLANDER.csv'},
+  {key:'HIGHLANDER',label:'Highlander',file:'HIGHLANDER.csv'},
+  {key:'SIENNA',label:'Sienna',file:'SIENNA.csv'},
+  {key:'4RUNNER',label:'4Runner',file:'4RUNNER.csv'},
+  {key:'CAMRY',label:'Camry',file:'CAMRY.csv'},
+  {key:'TACOMA',label:'Tacoma',file:'TACOMA.csv'},
+  {key:'TUNDRA',label:'Tundra',file:'TUNDRA.csv'},
+  {key:'CROWN',label:'Crown',file:'CROWN.csv'},
+];
+const DEFAULT_YEAR=2026, MAX_WAIT_DAYS=900;
+const STOP=new Set(['COUNTY','TRUST','FAMILY','LLC','INC','THE','REVOCABLE','LIVING','AND','SERVICE','SERVICES','CORP','JOINT','TEAM']);
+
+function parseCSV(text){const rows=[];let row=[],cur='',q=false;text=text.replace(/^﻿/,'');for(let i=0;i<text.length;i++){const c=text[i];if(q){if(c==='"'){if(text[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=c;}else{if(c==='"')q=true;else if(c===','){row.push(cur);cur='';}else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cur);rows.push(row);row=[];cur='';}else cur+=c;}}if(cur!==''||row.length){row.push(cur);rows.push(row);}return rows;}
+function parseDate(s){s=(s||'').trim();if(!s)return null;let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(!m){const t=s.match(/^(\d{1,2})\/(\d{2})(\d{4})$/);if(t)m=[0,t[1],t[2],t[3]];}
+  if(!m){const t=s.match(/^(\d{2})(\d{2})\/(\d{2})$/);if(t)m=[0,t[1],t[2],t[3]];}
+  if(!m){const d=s.match(/^(\d{1,2})\/(\d{1,2})$/);if(d)m=[0,d[1],d[2],String(DEFAULT_YEAR)];}
+  if(!m)return null;let y=+m[3];if(y<100)y+=2000;const dt=new Date(y,+m[1]-1,+m[2]);return isNaN(dt)?null:dt;}
+const fmt=d=>d?`${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`:'';
+const days=(a,b)=>Math.round((b-a)/86400000);
+const norm=h=>(h||'').trim().toUpperCase();
+const words=s=>String(s||'').toUpperCase().replace(/[^A-Z ]/g,' ').split(/\s+/).filter(w=>w.length>=3&&!STOP.has(w));
+const median=a=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);const m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+const pct=(a,p)=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(p*(s.length-1)+0.5))];};
+const wk=d=>d==null?'—':(d/7).toFixed(d<21?1:0).replace(/\.0$/,'');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- orders ---------- */
+function ordersFromCSV(model,text){
+  const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()));if(rows.length<2)return[];
+  const H=rows[0].map(norm);
+  const find=(...names)=>{for(const n of names){const i=H.findIndex(h=>h===n||h.startsWith(n));if(i>=0)return i;}return -1;};
+  let ix={date:0,name:find('LAST NAME','NAME'),code:find('MODEL CODE','MODEL'),sec:find('SECONDARY'),sales:find('SALES'),ext:find('EXT'),notes:find('NOTES')};
+  if(ix.code<0){ // RAV4 sheet: model-code column has an odd header — pick the column that's mostly 4-digit codes
+    const body=rows.slice(1);let best=-1,bs=0;H.forEach((h,i)=>{if(i===ix.name)return;const n=body.filter(r=>/^\s*\d{4}\s*$/.test(r[i]||'')).length;if(n>bs){bs=n;best=i;}});ix.code=best;
+  }
+  const g=(r,k)=>ix[k]>=0?(r[ix[k]]||'').trim():'';
+  return rows.slice(1).map((r,i)=>{const name=g(r,'name');if(!name)return null;
+    const codeRaw=g(r,'code'),code=(codeRaw.match(/\d{4}/)||[''])[0];
+    return {model,row:i+2,name:name.toUpperCase(),parts:name.toUpperCase().split(/[^A-Z]+/).filter(p=>p.length>=3),date:parseDate(g(r,'date')),rawDate:g(r,'date'),code,codeRaw,
+      alt:[code,...(g(r,'sec').match(/\d{4}/g)||[])].filter((c,j,a)=>c&&a.indexOf(c)===j),sales:g(r,'sales').toUpperCase(),ext:g(r,'ext'),notes:g(r,'notes'),skipped:/\bSKIP/i.test(g(r,'notes'))};
+  }).filter(Boolean);
+}
+/* ---------- sales summary ---------- */
+function salesFromCSV(text){
+  const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()));const H=rows[0].map(norm);
+  const ix=n=>H.findIndex(h=>h===n||h.startsWith(n));
+  const I={model:ix('MODEL'),mname:ix('MODEL NAME'),stock:ix('STOCK'),vin:ix('VIN'),type:ix('TYPE'),comments:ix('COMMENTS'),date:ix('DATE OF SALE'),cust:ix('CUSTOMER'),sp:ix('SALES PERSON'),ext:ix('EXT')};
+  if(I.model===I.mname){I.model=H.findIndex((h,i)=>h==='MODEL'&&i!==I.mname);}
+  return rows.slice(1).map(r=>{const g=k=>I[k]>=0?(r[I[k]]||'').trim():'';
+    const type=g('type');if(type&&!/RDR/i.test(type))return null;
+    const cm=g('comments').match(/^([A-Z]{2})\s*#?\s*(.*)$/i);
+    return {model:g('model'),code:(g('model').match(/\d{4}/)||[''])[0],mname:g('mname'),stock:g('stock'),vin:g('vin'),date:parseDate(g('date')),cust:g('cust'),custWords:words(g('cust')),
+      cmWords:words(cm?cm[2]:''),init:cm?cm[1].toUpperCase():'',sp:g('sp'),ext:g('ext')};
+  }).filter(s=>s&&s.date);
+}
+/* ---------- inventory: which open orders already have a unit reserved ---------- */
+function invFromCSV(text){
+  const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()));const H=rows[0].map(norm);
+  const ix=n=>H.findIndex(h=>h===n||h.startsWith(n));
+  const I={cat:ix('CAT'),model:H.findIndex(h=>h==='MODEL'),stock:ix('STOCK'),res:ix('RES'),comments:ix('COMMENTS'),mname:ix('MODEL NAME')};
+  return rows.slice(1).map(r=>{const g=k=>I[k]>=0?(r[I[k]]||'').trim():'';const cm=g('comments').match(/^([A-Z]{2})\s*#?\s*(.*)$/i);
+    return {cat:g('cat'),code:(g('model').match(/\d{4}/)||[''])[0],model:g('model'),stock:g('stock'),reserved:/^Y/i.test(g('res')),cmWords:words(cm?cm[2]:g('comments')),init:cm?cm[1].toUpperCase():'',mname:g('mname')};
+  }).filter(u=>u.code);
+}
+function assignUnits(orders,units){
+  const fam={};orders.forEach(o=>o.alt.forEach(c=>{if(!fam[c])fam[c]=o.model;}));
+  const used=new Set();
+  units.forEach(u=>{const f=fam[u.code];if(!f||!u.cmWords.length)return;
+    let m=orders.filter(o=>o.model===f&&!o.sale&&!used.has(o)&&o.parts.some(p=>u.cmWords.includes(p)));
+    if(m.length>1){const same=m.filter(o=>o.alt.includes(u.code));if(same.length)m=same;}
+    if(m.length>1&&u.init){const same=m.filter(o=>o.sales===u.init);if(same.length)m=same;}
+    if(m.length){m[0].unit=u;used.add(m[0]);}
+  });
+}
+/* ---------- matching: one order ↔ one RDR ---------- */
+function matchAll(orders,sales){
+  const fam={};orders.forEach(o=>o.alt.forEach(c=>{if(!fam[c])fam[c]=o.model;}));
+  const cands=[];
+  sales.forEach(s=>{const f=fam[s.code];if(!f)return;
+    orders.forEach(o=>{if(o.model!==f||!o.date)return;const d=days(o.date,s.date);if(d<0||d>MAX_WAIT_DAYS)return;
+      const strong=o.parts.some(p=>s.cmWords.includes(p));
+      const lastw=s.custWords[s.custWords.length-1]||'';
+      const byLast=o.parts.some(p=>p===lastw)||(o.parts.length>1&&s.custWords.includes(o.parts[0]));
+      if(!strong&&!byLast)return;
+      const score=(strong?3:0)+(s.code===o.code?2:0)+(s.init&&s.init===o.sales?1:0)+(byLast?1:0);
+      cands.push({score,d,o,s});});
+  });
+  cands.sort((a,b)=>b.score-a.score||a.d-b.d);
+  const uo=new Set(),us=new Set(),pairs=[];
+  cands.forEach(c=>{if(uo.has(c.o)||us.has(c.s))return;uo.add(c.o);us.add(c.s);c.o.sale=c.s;c.o.wait=c.d;pairs.push(c);});
+  return pairs;
+}
+
+/* ---------- state ---------- */
+let ORDERS=[],SALES=[],PAIRS=[],UNITS=[],NAMES={},active='ALL';
+function trimName(code){return NAMES[code]||code;}
+
+function render(){
+  const tabs=document.getElementById('tabs');tabs.innerHTML='';
+  [{key:'ALL',label:'All models'},...MODELS.filter(m=>ORDERS.some(o=>o.model===m.key))].forEach(m=>{
+    const list=ORDERS.filter(o=>m.key==='ALL'||o.model===m.key);const done=list.filter(o=>o.sale).length;
+    const b=document.createElement('button');b.className='tab'+(active===m.key?' active':'');b.innerHTML=`${esc(m.label)} <span class="cnt">${done} delivered · ${list.filter(o=>!o.sale&&!o.skipped).length} waiting</span>`;b.onclick=()=>{active=m.key;render();};tabs.appendChild(b);
+  });
+  const list=ORDERS.filter(o=>active==='ALL'||o.model===active);
+  const done=list.filter(o=>o.sale), open=list.filter(o=>!o.sale&&!o.skipped&&o.date);
+  const now=new Date();
+  // summary
+  const all=done.map(o=>o.wait);const recent=done.filter(o=>days(o.sale.date,now)<=90).map(o=>o.wait);
+  document.getElementById('summary').innerHTML=`<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
+    <div class="card"><div class="trim">Typical wait</div><div class="big">${wk(median(all))}<small>weeks</small></div><div class="range">${median(all)!=null?Math.round(median(all))+' days · middle half '+wk(pct(all,.25))+'–'+wk(pct(all,.75))+' wks':'no matched deliveries'}</div></div>
+    <div class="card"><div class="trim">Last 90 days</div><div class="big">${wk(median(recent))}<small>weeks</small></div><div class="range">${recent.length} deliveries since ${fmt(new Date(now-90*86400000))}</div></div>
+    <div class="card thin"><div class="trim">Delivered</div><div class="big">${done.length}</div><div class="range">orders matched to an RDR</div></div>
+    <div class="card thin"><div class="trim">Waiting now</div><div class="big">${open.length}</div><div class="range">${open.length?'median '+wk(median(open.map(o=>days(o.date,now))))+' wks so far · longest '+Math.max(...open.map(o=>days(o.date,now)))+'d':''}</div></div>
+    <div class="card thin" style="border-left-color:var(--blue)"><div class="trim">Filled, not delivered</div><div class="big">${open.filter(o=>o.unit).length}</div><div class="range">have a unit reserved in inventory (${open.filter(o=>o.unit&&/^G/.test(o.unit.cat)).length} on lot · ${open.filter(o=>o.unit&&/^F/.test(o.unit.cat)).length} in transit · ${open.filter(o=>o.unit&&/^A/.test(o.unit.cat)).length} allocated)</div></div></div>`;
+  // per-trim cards
+  const byCode={};done.forEach(o=>{(byCode[o.code]=byCode[o.code]||[]).push(o);});
+  const maxD=Math.max(60,...done.map(o=>o.wait));
+  const codes=Object.keys(byCode).sort((a,b)=>byCode[b].length-byCode[a].length||a.localeCompare(b));
+  document.getElementById('cards').innerHTML=codes.map(c=>{const w=byCode[c].map(o=>o.wait);const med=median(w),lo=pct(w,.25),hi=pct(w,.75);const rec=byCode[c].filter(o=>days(o.sale.date,now)<=90).map(o=>o.wait);
+    const waiting=open.filter(o=>o.code===c);const wnow=waiting.map(o=>days(o.date,now));
+    return `<div class="card${w.length<3?' thin':''}"><span class="trim">${esc(trimName(c))}</span><span class="code">${c}${active==='ALL'?' · '+esc((MODELS.find(m=>m.key===byCode[c][0].model)||{}).label||''):''}</span>
+      <div class="big">${wk(med)}<small>weeks typical</small></div>
+      <div class="range">${Math.round(med)} days · middle half ${wk(lo)}–${wk(hi)} wks · fastest ${Math.min(...w)}d, longest ${Math.max(...w)}d</div>
+      <div class="bar" title="Middle half of waits, on a 0–${maxD} day scale"><i class="q" style="left:${Math.min(...w)/maxD*100}%;width:${(Math.max(...w)-Math.min(...w))/maxD*100}%"></i><i style="left:${lo/maxD*100}%;width:${Math.max(1,(hi-lo)/maxD*100)}%"></i></div>
+      <div class="row"><span><b>${w.length}</b>delivered</span><span><b>${rec.length?wk(median(rec))+' wks':'—'}</b>last 90 days (${rec.length})</span><span><b>${waiting.length}</b>waiting now</span>${waiting.length?`<span><b>${wk(median(wnow))} wks</b>waited so far (median)</span>`:''}</div></div>`;
+  }).join('')||'<div class="note">No matched deliveries for this model yet.</div>';
+  // waiting cards
+  const byOpen={};open.forEach(o=>{(byOpen[o.code]=byOpen[o.code]||[]).push(o);});
+  document.getElementById('waiting').innerHTML=Object.keys(byOpen).sort((a,b)=>byOpen[b].length-byOpen[a].length).map(c=>{const w=byOpen[c].map(o=>days(o.date,now)).sort((x,y)=>y-x);const typ=median((byCode[c]||[]).map(o=>o.wait));
+    const over=typ!=null?w.filter(d=>d>typ).length:0;const oldest=byOpen[c].reduce((a,b)=>a.date<b.date?a:b);
+    return `<div class="card thin"><span class="trim">${esc(trimName(c))}</span><span class="code">${c}</span><div class="big">${byOpen[c].length}<small>waiting</small></div>
+      <div class="range">oldest: ${esc(oldest.name)} ${fmt(oldest.date)} (${w[0]}d)${typ!=null?' · '+over+' past the typical '+Math.round(typ)+'d':''}</div>
+      <div class="row"><span><b>${wk(median(w))} wks</b>median so far</span><span><b>${w.filter(d=>d<=typ).length||0}</b>within typical</span><span style="color:#ff8a94"><b style="color:#ff8a94">${over}</b>over typical</span><span style="color:var(--blue)"><b style="color:var(--blue)">${byOpen[c].filter(o=>o.unit).length}</b>unit reserved</span></div>
+      <div class="note">${byOpen[c].filter(o=>o.unit).map(o=>esc(o.name)+' → '+esc(o.unit.stock||o.unit.model)+' ('+({G:'on lot',F:'in transit',A:'allocated'}[o.unit.cat[0]]||o.unit.cat)+')').join(' · ')}</div></div>`;
+  }).join('')||'<div class="note">Nothing open.</div>';
+  renderChart(done);
+  // table
+  const tb=document.querySelector('#tbl tbody');tb.innerHTML=done.sort((a,b)=>b.sale.date-a.sale.date).map(o=>`<tr><td>${esc(trimName(o.code))} <span class="code" style="color:var(--muted)">${o.code}</span></td><td>${esc(o.name)}${o.sale.cust?' <span style="color:var(--muted)">('+esc(o.sale.cust)+')</span>':''}</td><td>${fmt(o.date)}</td><td>${fmt(o.sale.date)}</td><td class="r"><b>${o.wait}</b></td><td>${o.sale.code!==o.code?`<span class="pill a">${esc(o.sale.model)} ${esc(o.sale.mname)}</span>`:`<span class="pill g">same</span>`} ${esc(o.sale.stock)}</td><td>${esc(o.sales)}</td></tr>`).join('');
+}
+
+/* ---------- chart: median wait by RDR month, single series, direct-labeled ---------- */
+function renderChart(done){
+  const el=document.getElementById('chart');
+  const months={};done.forEach(o=>{const k=o.sale.date.getFullYear()+'-'+String(o.sale.date.getMonth()+1).padStart(2,'0');(months[k]=months[k]||[]).push(o.wait);});
+  const keys=Object.keys(months).sort();
+  document.getElementById('chartsub').textContent=`— median days from order to RDR, by month delivered (${active==='ALL'?'all models':MODELS.find(m=>m.key===active).label})`;
+  if(keys.length<2){el.innerHTML='<div class="note">Not enough delivered orders to chart yet.</div>';return;}
+  const W=Math.min(1400,el.clientWidth||900),H=300,P={l:44,r:20,t:24,b:44};
+  const pts=keys.map(k=>({k,med:median(months[k]),lo:pct(months[k],.25),hi:pct(months[k],.75),n:months[k].length}));
+  const maxY=Math.max(...pts.map(p=>p.hi))*1.1;const x=i=>P.l+(W-P.l-P.r)*(keys.length===1?.5:i/(keys.length-1));const y=v=>P.t+(H-P.t-P.b)*(1-v/maxY);
+  const lab=k=>new Date(+k.slice(0,4),+k.slice(5)-1,1).toLocaleDateString(undefined,{month:'short',year:'2-digit'});
+  const ticks=[];const step=maxY>200?60:maxY>100?30:14;for(let v=0;v<=maxY;v+=step)ticks.push(v);
+  const area=pts.map((p,i)=>`${x(i)},${y(p.hi)}`).join(' ')+' '+pts.map((p,i)=>`${x(i)},${y(p.lo)}`).reverse().join(' ');
+  el.innerHTML=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
+    ${ticks.map(v=>`<line x1="${P.l}" x2="${W-P.r}" y1="${y(v)}" y2="${y(v)}" stroke="#262626"/><text x="${P.l-6}" y="${y(v)+4}" fill="#8a8a8a" font-size="11" text-anchor="end">${v}d</text>`).join('')}
+    <polygon points="${area}" fill="#EB0A1E" opacity=".13"/>
+    <polyline points="${pts.map((p,i)=>`${x(i)},${y(p.med)}`).join(' ')}" fill="none" stroke="#EB0A1E" stroke-width="2" stroke-linejoin="round"/>
+    ${pts.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.med)}" r="4" fill="#EB0A1E" stroke="#0d0d0d" stroke-width="2"/><circle class="hit" data-i="${i}" cx="${x(i)}" cy="${y(p.med)}" r="14" fill="transparent"/>
+      <text x="${x(i)}" y="${y(p.med)-10}" fill="#f2f2f2" font-size="11" text-anchor="middle">${Math.round(p.med)}</text>
+      <text x="${x(i)}" y="${H-P.b+16}" fill="#a3a3a3" font-size="11" text-anchor="middle">${lab(p.k)}</text><text x="${x(i)}" y="${H-P.b+30}" fill="#666" font-size="10" text-anchor="middle">${p.n} deliv.</text>`).join('')}
+    <text x="${P.l}" y="14" fill="#a3a3a3" font-size="11">Line = median wait · shaded = middle half of orders that month</text></svg>`;
+  const tip=document.getElementById('tip');
+  el.querySelectorAll('.hit').forEach(c=>{c.onmousemove=e=>{const p=pts[+c.dataset.i];tip.style.display='block';tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-10)+'px';tip.innerHTML=`<b>${lab(p.k)}</b><br>median ${Math.round(p.med)}d (${wk(p.med)} wks)<br>middle half ${p.lo}–${p.hi}d<br>${p.n} deliveries`;};c.onmouseleave=()=>tip.style.display='none';});
+}
+window.addEventListener('resize',()=>render());
+
+/* ---------- boot ---------- */
+async function get(paths){for(const p of paths){try{const r=await fetch(p,{cache:'no-store'});if(!r.ok)continue;const t=await r.text();if(/<html/i.test(t))continue;return t;}catch(e){}}return null;}
+(async()=>{
+  let loaded=0;
+  await Promise.all(MODELS.map(async m=>{const t=await get(['data/'+m.file,m.file,'data/NEW VEHICLE ORDERS 2026 - '+m.label.toUpperCase()+'.csv']);if(t){ORDERS.push(...ordersFromCSV(m.key,t));loaded++;}}));
+  const st=await get(['sales.csv','data/sales.csv','Sales Summary.csv']);
+  if(st){SALES=salesFromCSV(st);SALES.forEach(s=>{if(s.code&&s.mname&&!NAMES[s.code])NAMES[s.code]=s.mname;});}
+  PAIRS=matchAll(ORDERS,SALES);
+  PAIRS.forEach(c=>{if(!NAMES[c.o.code]&&c.s.mname)NAMES[c.o.code]=c.s.mname+' (ordered '+c.o.code+')';});
+  const it=await get(['inventory.csv','data/inventory.csv']);if(it){UNITS=invFromCSV(it);assignUnits(ORDERS,UNITS);}
+  document.getElementById('srcinfo').textContent=st?`${ORDERS.length} orders from ${loaded} sheets · ${SALES.length} RDRs in sales.csv (${fmt(SALES.reduce((a,b)=>a.date<b.date?a:b).date)} – ${fmt(SALES.reduce((a,b)=>a.date>b.date?a:b).date)}) · ${PAIRS.length} matched`:'sales.csv not found — commit the Sales Summary export as sales.csv in the repo root.';
+  render();
+})();
+</script>
+</body>
+</html>

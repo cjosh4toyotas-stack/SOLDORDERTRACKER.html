@@ -100,6 +100,7 @@
     <button id="btnExport" title="Download status.json — commit it to the repo so statuses follow you across devices">Export status.json</button>
     <label class="tab" style="cursor:pointer">Import status.json <input type="file" id="fileStatus" accept=".json" hidden></label>
     <label class="tab" style="cursor:pointer">Load order CSVs <input type="file" id="fileOrders" accept=".csv" multiple hidden></label>
+    <a href="waits.html" class="tab" style="text-decoration:none">Wait times →</a>
     <button id="btnPrint">Print</button>
   </div>
 </header>
@@ -193,6 +194,7 @@
 <script>
 /* ===================== CONFIG ===================== */
 const MODELS = [
+  {key:'RAV4', label:'RAV4', file:'data/RAV4.csv'},
   {key:'4RUNNER', label:'4Runner', file:'data/4RUNNER.csv'},
   {key:'CAMRY', label:'Camry', file:'data/CAMRY.csv'},
   {key:'CROWN', label:'Crown', file:'data/CROWN.csv'},
@@ -240,6 +242,7 @@ function parseDate(s){
     const t=s.match(/^(\d{1,2})\/(\d{2})(\d{4})$/);
     if(t) m=[null,t[1],t[2],t[3]];
   }
+  if(!m){ const t=s.match(/^(\d{2})(\d{2})\/(\d{2})$/); if(t) m=[null,t[1],t[2],t[3]]; }
   if(!m){ const d=s.match(/^(\d{1,2})\/(\d{1,2})$/); if(d) m=[null,d[1],d[2],String(DEFAULT_YEAR)]; }
   if(!m) return null;
   let y=parseInt(m[3],10); if(y<100) y+=2000;
@@ -276,6 +279,9 @@ function ordersFromCSV(modelKey, text){
     sales: colIndex(H,['SALES']),
     notes: colIndex(H,['NOTES']),
   };
+  if(ix.code<0){ const body=rows.slice(1); let best=-1,bs=0; H.forEach((h,i)=>{ if(i===ix.lastName) return; const n=body.filter(r=>/^\s*\d{4}\s*$/.test(r[i]||'')).length; if(n>bs){bs=n;best=i;} }); ix.code=best; }
+  if(ix.orderNum<0){ const i=H.findIndex(h=>h==='#'); if(i>=0) ix.orderNum=i; }
+  if(ix.pricing<0){ const i=H.findIndex(h=>h.startsWith('$')); if(i>=0) ix.pricing=i; }
   const g=(r,k)=> ix[k]>=0 ? (r[ix[k]]||'').trim() : '';
   const out=[];
   rows.slice(1).forEach((r,n)=>{
@@ -293,11 +299,55 @@ function ordersFromCSV(modelKey, text){
       acc:g(r,'acc'), pricing:g(r,'pricing'), mgr:g(r,'mgr').toUpperCase(), sales:g(r,'sales').toUpperCase(), notes:g(r,'notes'),
     };
     o.key=[modelKey,o.orderNum,lastName.toUpperCase().replace(/\s+/g,' '),o.deal].join('|');
+    o.parts=lastName.toUpperCase().split(/[^A-Z]+/).filter(p=>p.length>=3);
     o.altCodes=[o.code].concat((o.secondary.match(/\d{4}/g)||[]),(o.codeRaw.match(/\d{4}/g)||[])).filter((c,i,a)=>c&&a.indexOf(c)===i);
+    o.alt=o.altCodes;
     out.push(o);
   });
   return out;
 }
+
+const MAX_WAIT_DAYS=900;
+const STOP=new Set(['COUNTY','TRUST','FAMILY','LLC','INC','THE','REVOCABLE','LIVING','AND','SERVICE','SERVICES','CORP','JOINT','TEAM']);
+
+const days=(a,b)=>Math.round((b-a)/86400000);
+const words=s=>String(s||'').toUpperCase().replace(/[^A-Z ]/g,' ').split(/\s+/).filter(w=>w.length>=3&&!STOP.has(w));
+const median=a=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);const m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+const pct=(a,p)=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(p*(s.length-1)+0.5))];};
+const wk=d=>d==null?'—':(d/7).toFixed(d<21?1:0).replace(/\.0$/,'');
+
+/* ---------- sales summary ---------- */
+function salesFromCSV(text){
+  const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()));const H=rows[0].map(normHeader);
+  const ix=n=>H.findIndex(h=>h===n||h.startsWith(n));
+  const I={model:ix('MODEL'),mname:ix('MODEL NAME'),stock:ix('STOCK'),vin:ix('VIN'),type:ix('TYPE'),comments:ix('COMMENTS'),date:ix('DATE OF SALE'),cust:ix('CUSTOMER'),sp:ix('SALES PERSON'),ext:ix('EXT')};
+  if(I.model===I.mname){I.model=H.findIndex((h,i)=>h==='MODEL'&&i!==I.mname);}
+  return rows.slice(1).map(r=>{const g=k=>I[k]>=0?(r[I[k]]||'').trim():'';
+    const type=g('type');if(type&&!/RDR/i.test(type))return null;
+    const cm=g('comments').match(/^([A-Z]{2})\s*#?\s*(.*)$/i);
+    return {model:g('model'),code:(g('model').match(/\d{4}/)||[''])[0],mname:g('mname'),stock:g('stock'),vin:g('vin'),date:parseDate(g('date')),cust:g('cust'),custWords:words(g('cust')),
+      cmWords:words(cm?cm[2]:''),init:cm?cm[1].toUpperCase():'',sp:g('sp'),ext:g('ext')};
+  }).filter(s=>s&&s.date);
+}
+/* ---------- matching: one order ↔ one RDR ---------- */
+function matchAll(orders,sales){
+  const fam={};orders.forEach(o=>o.alt.forEach(c=>{if(!fam[c])fam[c]=o.model;}));
+  const cands=[];
+  sales.forEach(s=>{const f=fam[s.code];if(!f)return;
+    orders.forEach(o=>{if(o.model!==f||!o.date)return;const d=days(o.date,s.date);if(d<0||d>MAX_WAIT_DAYS)return;
+      const strong=o.parts.some(p=>s.cmWords.includes(p));
+      const lastw=s.custWords[s.custWords.length-1]||'';
+      const byLast=o.parts.some(p=>p===lastw)||(o.parts.length>1&&s.custWords.includes(o.parts[0]));
+      if(!strong&&!byLast)return;
+      const score=(strong?3:0)+(s.code===o.code?2:0)+(s.init&&s.init===o.sales?1:0)+(byLast?1:0);
+      cands.push({score,d,o,s});});
+  });
+  cands.sort((a,b)=>b.score-a.score||a.d-b.d);
+  const uo=new Set(),us=new Set(),pairs=[];
+  cands.forEach(c=>{if(uo.has(c.o)||us.has(c.s))return;uo.add(c.o);us.add(c.s);c.o.sale=c.s;c.o.wait=c.d;pairs.push(c);});
+  return pairs;
+}
+
 
 /* ===================== STATE ===================== */
 let ORDERS=[];            // all orders across models
@@ -319,6 +369,7 @@ function mergeStatus(incoming){
 function statusOf(o){
   const s=STATUS[o.key];
   if(s) return s;
+  if(o.sale) return {status:'filled',stock:o.sale.stock,date:'RDR '+fmtDate(o.sale.date),note:'Delivered '+fmtDate(o.sale.date)+' as '+o.sale.model+' '+o.sale.mname+' ('+o.sale.cust+') — '+o.wait+' days',seeded:true,rdr:true};
   if(/\bSKIP/i.test(o.notes)) return {status:'skipped',note:'From notes: '+o.notes,seeded:true};
   return {status:'open'};
 }
@@ -520,7 +571,7 @@ function render(){
       <td class="nostrike"><span class="seq">${o.seq}</span></td>
       <td class="nostrike">${dateCell}</td>
       <td><b>${esc(o.lastName)}</b></td>
-      <td class="nostrike"><span class="pill ${st.status}">${st.status.toUpperCase()}</span>${st.date?`<div class="seq">${esc(st.date)}</div>`:''}</td>
+      <td class="nostrike"><span class="pill ${st.status}">${st.rdr?'DELIVERED':st.status.toUpperCase()}</span>${st.date?`<div class="seq">${esc(st.date)}</div>`:''}</td>
       <td class="nostrike">${fillCell}</td>
       <td class="nostrike">${flagCell}</td>
       <td>${esc(o.orderNum)}</td>
@@ -534,7 +585,7 @@ function render(){
       <td>${esc(o.pricing)}</td>
       <td>${esc(o.mgr)}</td>
       <td>${esc(o.sales)}</td>
-      <td class="wrapcell">${esc(o.notes)}${st.note&&!st.seeded?`<div class="muted">↳ ${esc(st.note)}</div>`:''}</td>`;
+      <td class="wrapcell">${esc(o.notes)}${st.note&&(!st.seeded||st.rdr)?`<div class="muted">↳ ${esc(st.note)}</div>`:''}</td>`;
     tr.onclick=()=>openModal(o);
     tb.appendChild(tr);
   });
@@ -644,13 +695,17 @@ async function boot(){
       try{ const r=await fetch(path,{cache:'no-store'}); if(!r.ok) continue; const text=await r.text(); if(/<html/i.test(text)) continue; const parsed=ordersFromCSV(m.key,text); ORDERS.push(...parsed); loaded++; break; }catch(e){}
     }
   }));
+  // sales.csv (Sales Summary export): RDR'd orders auto-mark as filled
+  let SALES=[];
+  try{ const r=await fetch('sales.csv',{cache:'no-store'}); if(r.ok){ const t=await r.text(); if(!/<html/i.test(t)) SALES=salesFromCSV(t); } }catch(e){}
+  if(SALES.length){ ORDERS.forEach(o=>{o.sale=null;o.wait=null;}); matchAll(ORDERS,SALES); }
   // status.json committed to the repo (optional) — merged, newest wins
   try{ const r=await fetch('status.json',{cache:'no-store'}); if(r.ok){ const j=await r.json(); mergeStatus(j.statuses||j); } }catch(e){}
   // inventory: repo file first, unless a newer paste/upload is saved in this browser
   let repoInv=null;
   try{ const r=await fetch('inventory.csv',{cache:'no-store'}); if(r.ok){ const t=await r.text(); if(!/<html/i.test(t)){ repoInv=t; const lm=r.headers.get('last-modified'); document.getElementById('invsrc').innerHTML=`Inventory from <code>inventory.csv</code> in the repo${lm?' (updated '+new Date(lm).toLocaleDateString()+')':''}. Paste or upload a newer Inventory Summary export below to override in this browser only — commit it as <code>inventory.csv</code> to update it for everyone.`; } } }catch(e){}
   activeModel=(MODELS.find(m=>ORDERS.some(o=>o.model===m.key))||MODELS[0]).key;
-  document.getElementById('srcinfo').textContent=loaded?`${ORDERS.length} orders from ${loaded} CSVs · ${new Date().toLocaleDateString()}`:'Could not fetch the order CSVs (expected data/<MODEL>.csv or <MODEL>.csv next to index.html) — use "Load order CSVs" to pick the files.';
+  document.getElementById('srcinfo').textContent=loaded?`${ORDERS.length} orders from ${loaded} CSVs${SALES.length?' · '+ORDERS.filter(o=>o.sale).length+' matched to RDRs in sales.csv':''} · ${new Date().toLocaleDateString()}`:'Could not fetch the order CSVs (expected data/<MODEL>.csv or <MODEL>.csv next to index.html) — use "Load order CSVs" to pick the files.';
   let local=null; try{ local=localStorage.getItem(INV_KEY); }catch(e){}
   if(local) { document.getElementById('invText').value=local; loadInventory(local); }
   else if(repoInv) loadInventory(repoInv,false);
