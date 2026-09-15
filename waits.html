@@ -30,6 +30,17 @@
   .card .bar i{position:absolute;top:0;bottom:0;background:var(--red);border-radius:3px}
   .card .bar i.q{background:#5a1b21}
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
+  .models{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+  .mbox{background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--red);border-radius:8px;padding:14px 16px;cursor:pointer}
+  .mbox:hover{border-color:#666;border-top-color:var(--red)}
+  .mbox h3{margin:0 0 2px;font-size:18px} .mbox .msub{color:var(--muted);font-size:12px;margin-bottom:10px}
+  .trimrow{display:grid;grid-template-columns:1fr auto;align-items:baseline;column-gap:10px;padding:7px 0;border-top:1px solid var(--line)}
+  .trimrow .tn{font-size:13px;font-weight:bold} .trimrow .tn span{color:var(--muted);font-size:11px;margin-left:5px;font-weight:normal}
+  .trimrow .tw{font-size:20px;font-weight:bold;white-space:nowrap;text-align:right} .trimrow .tw small{font-size:11px;color:var(--muted);font-weight:normal;margin-left:4px}
+  .trimrow .tw.est{color:var(--muted)}
+  .trimrow .tr{grid-column:1/3;color:var(--muted);font-size:11px;margin-top:1px}
+  .back{background:var(--panel2);border:1px solid #444;color:var(--text);padding:7px 11px;border-radius:5px;cursor:pointer;font-size:13px;margin-bottom:12px}
+  #detail{display:none}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
   svg text{font-family:Arial,Helvetica,sans-serif}
   .tip{position:fixed;pointer-events:none;background:#000;border:1px solid #444;border-radius:5px;padding:6px 9px;font-size:12px;display:none;z-index:9}
@@ -51,6 +62,9 @@
   <div style="display:flex;gap:8px"><a href="index.html">Order tracker</a><a href="#" onclick="window.print();return false">Print</a></div>
 </header>
 <div class="wrap">
+  <div id="overview"></div>
+  <div id="detail">
+  <button class="back" id="back">← All models</button>
   <div class="tabs" id="tabs"></div>
   <div id="summary"></div>
   <h2>Typical wait by trim <span style="text-transform:none;letter-spacing:0">— order date to RDR, matched from the Sales Summary</span></h2>
@@ -62,6 +76,7 @@
   <details><summary>Show every matched order (order → RDR)</summary>
     <div class="tablewrap" style="margin-top:8px"><table id="tbl"><thead><tr><th>Trim ordered</th><th>Customer</th><th>Ordered</th><th>RDR'd</th><th class="r">Days</th><th>Delivered as</th><th>Sales</th></tr></thead><tbody></tbody></table></div>
   </details>
+  </div>
 </div>
 <div class="tip" id="tip"></div>
 <footer>Wait = order date on the sold-order sheet → Date of Sale (RDR) in the Sales Summary, matched by customer name within the model family. Typical = median; range = middle half (25th–75th percentile). Approximate — the order sheets and sales report are hand-kept.</footer>
@@ -167,6 +182,33 @@ function matchAll(orders,sales){
 let ORDERS=[],SALES=[],PAIRS=[],UNITS=[],NAMES={},active='ALL';
 function trimName(code){return NAMES[code]||code;}
 
+// Estimated wait for a trim: recent (90-day) median when there are 3+, else all-time median, else the model's median flagged as an estimate
+function estimate(code,modelKey){
+  const now=new Date();
+  const d=ORDERS.filter(o=>o.sale&&o.code===code);const rec=d.filter(o=>days(o.sale.date,now)<=90);
+  if(rec.length>=3) return {wk:median(rec.map(o=>o.wait)),n:d.length,lo:pct(d.map(o=>o.wait),.25),hi:pct(d.map(o=>o.wait),.75),basis:'recent'};
+  if(d.length) return {wk:median(d.map(o=>o.wait)),n:d.length,lo:pct(d.map(o=>o.wait),.25),hi:pct(d.map(o=>o.wait),.75),basis:'all'};
+  const m=ORDERS.filter(o=>o.sale&&o.model===modelKey).map(o=>o.wait);
+  if(m.length) return {wk:median(m),n:0,lo:pct(m,.25),hi:pct(m,.75),basis:'model'};
+  return null;
+}
+function renderOverview(){
+  const el=document.getElementById('overview');const now=new Date();
+  el.innerHTML='<div class="models">'+MODELS.filter(m=>ORDERS.some(o=>o.model===m.key)).map(m=>{
+    const list=ORDERS.filter(o=>o.model===m.key);const done=list.filter(o=>o.sale);const open=list.filter(o=>!o.sale&&!o.skipped&&o.date);
+    const codes=[...new Set(list.map(o=>o.code).filter(Boolean))].map(c=>({c,e:estimate(c,m.key),n:done.filter(o=>o.code===c).length,w:open.filter(o=>o.code===c).length}))
+      .sort((a,b)=>(b.n+b.w)-(a.n+a.w));
+    const mm=median(done.map(o=>o.wait));
+    return `<div class="mbox" data-m="${m.key}"><h3>${esc(m.label)}</h3><div class="msub">${mm!=null?'typical '+wk(mm)+' wks · ':''}${done.length} delivered · ${open.length} waiting</div>
+      ${codes.map(t=>{const e=t.e;const big=e?(e.wk<21?'~'+Math.round(e.wk)+'<small>days</small>':'~'+Math.round(e.wk/7)+'<small>wks</small>'):'—';
+        return `<div class="trimrow"><div class="tn">${esc(trimName(t.c))}<span>${t.c}</span></div>
+        <div class="tw${e&&e.basis==='model'?' est':''}">${big}</div>
+        <div class="tr">${e?(e.basis==='model'?'no deliveries yet — model average':(e.n+' delivered'+(e.n>=3?' · usually '+wk(e.lo)+'–'+wk(e.hi)+' wks':' · '+Math.round(e.wk)+' days'))):'no data'}${t.w?' · '+t.w+' waiting':''}</div></div>`;}).join('')}</div>`;
+  }).join('')+'</div><div class="note" style="margin-top:12px">Weeks from order date to RDR, median of matched deliveries. Click a model for the trend, who is waiting, and every matched order.</div>';
+  el.querySelectorAll('.mbox').forEach(b=>b.onclick=()=>{active=b.dataset.m;showDetail(true);render();});
+}
+function showDetail(on){document.getElementById('detail').style.display=on?'block':'none';document.getElementById('overview').style.display=on?'none':'block';if(!on)window.scrollTo(0,0);}
+document.getElementById('back').onclick=()=>{showDetail(false);renderOverview();};
 function render(){
   const tabs=document.getElementById('tabs');tabs.innerHTML='';
   [{key:'ALL',label:'All models'},...MODELS.filter(m=>ORDERS.some(o=>o.model===m.key))].forEach(m=>{
@@ -234,7 +276,7 @@ function renderChart(done){
   const tip=document.getElementById('tip');
   el.querySelectorAll('.hit').forEach(c=>{c.onmousemove=e=>{const p=pts[+c.dataset.i];tip.style.display='block';tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-10)+'px';tip.innerHTML=`<b>${lab(p.k)}</b><br>median ${Math.round(p.med)}d (${wk(p.med)} wks)<br>middle half ${p.lo}–${p.hi}d<br>${p.n} deliveries`;};c.onmouseleave=()=>tip.style.display='none';});
 }
-window.addEventListener('resize',()=>render());
+window.addEventListener('resize',()=>{if(document.getElementById('detail').style.display==='block')render();});
 
 /* ---------- boot ---------- */
 async function get(paths){for(const p of paths){try{const r=await fetch(p,{cache:'no-store'});if(!r.ok)continue;const t=await r.text();if(/<html/i.test(t))continue;return t;}catch(e){}}return null;}
@@ -246,8 +288,8 @@ async function get(paths){for(const p of paths){try{const r=await fetch(p,{cache
   PAIRS=matchAll(ORDERS,SALES);
   PAIRS.forEach(c=>{if(!NAMES[c.o.code]&&c.s.mname)NAMES[c.o.code]=c.s.mname+' (ordered '+c.o.code+')';});
   const it=await get(['inventory.csv','data/inventory.csv']);if(it){UNITS=invFromCSV(it);assignUnits(ORDERS,UNITS);}
+  renderOverview(); showDetail(false);
   document.getElementById('srcinfo').textContent=st?`${ORDERS.length} orders from ${loaded} sheets · ${SALES.length} RDRs in sales.csv (${fmt(SALES.reduce((a,b)=>a.date<b.date?a:b).date)} – ${fmt(SALES.reduce((a,b)=>a.date>b.date?a:b).date)}) · ${PAIRS.length} matched`:'sales.csv not found — commit the Sales Summary export as sales.csv in the repo root.';
-  render();
 })();
 </script>
 </body>
