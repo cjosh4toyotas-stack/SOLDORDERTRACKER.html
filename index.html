@@ -43,8 +43,8 @@
   tr.order{cursor:pointer}
   tr.order:hover td{background:#222}
   tr.filled td{color:#9fd8b3}
-  tr.skipped td{color:#777;text-decoration:line-through}
-  tr.skipped td.nostrike{text-decoration:none}
+  tr.skipped td,tr.lost td{color:#777;text-decoration:line-through}
+  tr.skipped td.nostrike,tr.lost td.nostrike{text-decoration:none}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;letter-spacing:.3px;text-decoration:none}
   .pill.open{background:#3b2f0c;color:var(--amber)}
   .pill.filled{background:#0f3a22;color:var(--green)}
@@ -189,7 +189,7 @@
 </div>
 <div class="toast" id="toast"></div>
 
-<footer>Statuses are saved in this browser (localStorage). Export status.json and commit it to the repo to share across devices. Order CSVs live in <code>data/</code> — replace them with fresh exports to update.</footer>
+<footer>Statuses are saved in this browser (localStorage). Export status.json and commit it to the repo to share across devices. Order CSVs sit next to <code>index.html</code> — replace them with fresh exports to update.</footer>
 
 <script>
 /* ===================== CONFIG ===================== */
@@ -266,16 +266,19 @@ function ordersFromCSV(modelKey, text){
   const ix={
     date: (()=>{const i=colIndex(H,['DATE']); return i>=0?i:0;})(),
     orderNum: colIndex(H,['ORDER #','ORDER']),
+    bos: H.findIndex(h=>h==='BOS'),
+    filled: H.findIndex(h=>h==='FILLED'),
+    lost: H.findIndex(h=>h==='LOST'),
     lastName: colIndex(H,['LAST NAME','NAME']),
-    deal: colIndex(H,['DEAL #','DEAL']),
-    code: colIndex(H,['MODEL CODE','MODEL']),
-    secondary: colIndex(H,['SECONDARY']),
+    deal: colIndex(H,['DEAL #','DEAL','D#']),
+    code: colIndex(H,['MODEL CODE','MODEL','M#']),
+    secondary: colIndex(H,['SECONDARY','SECOND']),
     ext: colIndex(H,['EXT COLOR','EXT']),
     int: colIndex(H,['INT COLOR','INT']),
     depo: colIndex(H,['DEPO']),
     acc: colIndex(H,['ACCESORIES','ACCESSORIES','ACC']),
     pricing: colIndex(H,['PRICING','PRICE']),
-    mgr: colIndex(H,['MGR']),
+    mgr: colIndex(H,['MGR','SM']),
     sales: colIndex(H,['SALES']),
     notes: colIndex(H,['NOTES']),
   };
@@ -283,7 +286,7 @@ function ordersFromCSV(modelKey, text){
   if(ix.orderNum<0){ const i=H.findIndex(h=>h==='#'); if(i>=0) ix.orderNum=i; }
   if(ix.pricing<0){ const i=H.findIndex(h=>h.startsWith('$')); if(i>=0) ix.pricing=i; }
   const g=(r,k)=> ix[k]>=0 ? (r[ix[k]]||'').trim() : '';
-  const out=[];
+  const out=[], seenKeys={};
   rows.slice(1).forEach((r,n)=>{
     const lastName=g(r,'lastName');
     if(!lastName) return; // blank/placeholder rows
@@ -291,14 +294,25 @@ function ordersFromCSV(modelKey, text){
     const date=parseDate(rawDate);
     const codeRaw=g(r,'code');
     const code4=(codeRaw.match(/\d{4}/)||[''])[0];
+    // Current sheet layout: BOS / FILLED / LOST are checkboxes (TRUE/FALSE). Older rows carry the order # in the BOS column.
+    const isT=v=>/^(TRUE|YES|X|✓)$/i.test(v), isBool=v=>v===''||/^(TRUE|FALSE|YES|NO|X|✓|N\/A)$/i.test(v);
+    const bosRaw=g(r,'bos'), filledRaw=g(r,'filled'), lostRaw=g(r,'lost');
+    if(isT(lostRaw)) return; // LOST on the sheet: leave it off the tracker entirely
+    let orderNum=g(r,'orderNum'); if(!orderNum && bosRaw && !isBool(bosRaw)) orderNum=bosRaw;
+    let notes=g(r,'notes');
+    [filledRaw,lostRaw].forEach(v=>{ if(v && !isBool(v)) notes=notes?notes+' · '+v:v; });
     const o={
+      bos:isT(bosRaw), sheetFilled:isT(filledRaw), sheetLost:isT(lostRaw),
       model:modelKey, rowNum:n+2, rawDate, date,
-      urgent:/URGENT|PRIORITY/i.test(rawDate)||/URGENT|PRIORITY/i.test(g(r,'orderNum'))||/PRIORITY #1|URGENT/i.test(g(r,'notes')),
-      orderNum:g(r,'orderNum'), lastName, deal:g(r,'deal'), codeRaw, code:code4,
+      urgent:/URGENT|PRIORITY/i.test(rawDate)||/URGENT|PRIORITY/i.test(orderNum)||/PRIORITY #1|URGENT/i.test(notes),
+      orderNum, lastName, deal:g(r,'deal'), codeRaw, code:code4,
       secondary:g(r,'secondary'), ext:g(r,'ext'), int:g(r,'int'), depo:g(r,'depo'),
-      acc:g(r,'acc'), pricing:g(r,'pricing'), mgr:g(r,'mgr').toUpperCase(), sales:g(r,'sales').toUpperCase(), notes:g(r,'notes'),
+      acc:g(r,'acc'), pricing:g(r,'pricing'), mgr:g(r,'mgr').toUpperCase(), sales:g(r,'sales').toUpperCase(), notes,
     };
+    o.nameKey=[modelKey,lastName.toUpperCase().replace(/\s+/g,' '),o.deal].join('|');
     o.key=[modelKey,o.orderNum,lastName.toUpperCase().replace(/\s+/g,' '),o.deal].join('|');
+    // same customer with two orders and no order #: keep their statuses separate
+    if(seenKeys[o.key]){ o.dup=true; o.key+='|'+(o.code||'')+'|'+(++seenKeys[o.key]); } else seenKeys[o.key]=1;
     o.parts=lastName.toUpperCase().split(/[^A-Z]+/).filter(p=>p.length>=3);
     o.altCodes=[o.code].concat((o.secondary.match(/\d{4}/g)||[]),(o.codeRaw.match(/\d{4}/g)||[])).filter((c,i,a)=>c&&a.indexOf(c)===i);
     o.alt=o.altCodes;
@@ -356,8 +370,8 @@ let INV=null;             // {units:[], map:{}, headers:[]}
 let activeModel=null;
 let sortKey='seq', sortDir=1;
 
-function loadStatus(){ try{STATUS=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');}catch(e){STATUS={};} }
-function saveStatus(){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(STATUS));}catch(e){} }
+function loadStatus(){ try{STATUS=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');}catch(e){STATUS={};} LEGACY_IDX=null; }
+function saveStatus(){ LEGACY_IDX=null; try{localStorage.setItem(STORAGE_KEY,JSON.stringify(STATUS));}catch(e){} }
 function mergeStatus(incoming){
   let n=0;
   for(const k in incoming){
@@ -366,11 +380,21 @@ function mergeStatus(incoming){
   }
   saveStatus(); return n;
 }
+let LEGACY_IDX=null;
+function legacyKeyFor(o){
+  if(o.dup) return null;
+  if(!LEGACY_IDX){ LEGACY_IDX={}; for(const k in STATUS){ const p=k.split('|'); if(p.length===4 && p[1]) LEGACY_IDX[[p[0],p[2],p[3]].join('|')]=k; } }
+  const k=LEGACY_IDX[o.nameKey]; return k&&k!==o.key?k:null;
+}
 function statusOf(o){
-  const s=STATUS[o.key];
+  let s=STATUS[o.key];
+  if(!s){ // statuses saved before the sheet dropped its order # column: match on model + name + deal #
+    const lk=legacyKeyFor(o); if(lk) s=STATUS[lk];
+  }
   if(s) return s;
   if(o.sale) return {status:'filled',stock:o.sale.stock,date:'RDR '+fmtDate(o.sale.date),note:'Delivered '+fmtDate(o.sale.date)+' as '+o.sale.model+' '+o.sale.mname+' ('+o.sale.cust+') — '+o.wait+' days',seeded:true,rdr:true};
   if(/\bSKIP/i.test(o.notes)) return {status:'skipped',note:'From notes: '+o.notes,seeded:true};
+  if(o.sheetFilled) return {status:'filled',note:'Marked FILLED on the order sheet',seeded:true};
   return {status:'open'};
 }
 
@@ -509,8 +533,8 @@ function renderTabs(){
   });
 }
 function renderTiles(list){
-  const c={open:0,filled:0,skipped:0};
-  list.forEach(o=>c[statusOf(o).status]++);
+  const c={open:0,filled:0,skipped:0,lost:0};
+  list.forEach(o=>{const k=statusOf(o).status; c[k]=(c[k]||0)+1;});
   const flags=list.filter(o=>o.flag).length;
   const openDated=list.filter(o=>statusOf(o).status==='open'&&o.date);
   const oldest=openDated.length?openDated.reduce((a,b)=>a.date<b.date?a:b):null;
@@ -650,6 +674,7 @@ document.getElementById('mSave').onclick=()=>{
   if(!modalOrder) return;
   const rec={status:modalStatus,stock:document.getElementById('mStock').value.trim(),date:document.getElementById('mDate').value.trim(),note:document.getElementById('mNote').value.trim(),updated:Date.now()};
   if(rec.status==='open'&&!rec.stock&&!rec.note&&!rec.date) delete STATUS[modalOrder.key]; else STATUS[modalOrder.key]=rec;
+  { const lk=legacyKeyFor(modalOrder); if(lk){ delete STATUS[lk]; } }
   saveStatus(); document.getElementById('overlay').classList.remove('show'); render();
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('overlay').classList.remove('show'); if(e.key==='Enter'&&document.getElementById('overlay').classList.contains('show')&&e.target.tagName==='INPUT') document.getElementById('mSave').click(); });

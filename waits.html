@@ -68,7 +68,7 @@
   <button class="back" id="back">← All models</button>
   <div class="tabs" id="tabs"></div>
   <div id="summary"></div>
-  <h2>Typical wait by trim <span style="text-transform:none;letter-spacing:0">— order date to RDR, matched from the Sales Summary</span></h2>
+  <h2>Quote range by trim <span style="text-transform:none;letter-spacing:0">— order date to RDR, counting orders still waiting</span></h2>
   <div class="cards" id="cards"></div>
   <h2>Wait time over time <span style="text-transform:none;letter-spacing:0" id="chartsub"></span></h2>
   <div class="panel"><div id="chart"></div></div>
@@ -80,7 +80,7 @@
   </div>
 </div>
 <div class="tip" id="tip"></div>
-<footer>Wait = order date on the sold-order sheet → Date of Sale (RDR) in the Sales Summary, matched by customer name within the model family. Typical = median; range = middle half (25th–75th percentile). Approximate — the order sheets and sales report are hand-kept.</footer>
+<footer>Wait = order date on the sold-order sheet → Date of Sale (RDR) in the Sales Summary, matched by customer name within the model family. Quote range = when half, then 4 in 5, of all orders (delivered and still waiting) have delivered. Delivered median and middle half (25th–75th percentile) are shown for reference. Approximate — the order sheets and sales report are hand-kept.</footer>
 
 <script>
 const MODELS=[
@@ -119,7 +119,7 @@ function ordersFromCSV(model,text){
   const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()));if(rows.length<2)return[];
   const H=rows[0].map(norm);
   const find=(...names)=>{for(const n of names){const i=H.findIndex(h=>h===n||h.startsWith(n));if(i>=0)return i;}return -1;};
-  let ix={date:0,name:find('LAST NAME','NAME'),code:find('MODEL CODE','MODEL'),sec:find('SECONDARY'),sales:find('SALES'),ext:find('EXT'),notes:find('NOTES')};
+  let ix={date:0,name:find('LAST NAME','NAME'),code:find('MODEL CODE','MODEL','M#'),sec:find('SECONDARY','SECOND'),sales:find('SALES'),ext:find('EXT'),notes:find('NOTES'),lost:H.findIndex(h=>h==='LOST')};
   if(ix.code<0){ // RAV4 sheet: model-code column has an odd header — pick the column that's mostly 4-digit codes
     const body=rows.slice(1);let best=-1,bs=0;H.forEach((h,i)=>{if(i===ix.name)return;const n=body.filter(r=>/^\s*\d{4}\s*$/.test(r[i]||'')).length;if(n>bs){bs=n;best=i;}});ix.code=best;
   }
@@ -127,7 +127,7 @@ function ordersFromCSV(model,text){
   return rows.slice(1).map((r,i)=>{const name=g(r,'name');if(!name)return null;
     const codeRaw=g(r,'code'),code=(codeRaw.match(/\d{4}/)||[''])[0];
     return {model,row:i+2,name:name.toUpperCase(),parts:name.toUpperCase().split(/[^A-Z]+/).filter(p=>p.length>=3),date:parseDate(g(r,'date')),rawDate:g(r,'date'),code,codeRaw,
-      alt:[code,...(g(r,'sec').match(/\d{4}/g)||[])].filter((c,j,a)=>c&&a.indexOf(c)===j),sales:g(r,'sales').toUpperCase(),ext:g(r,'ext'),notes:g(r,'notes'),skipped:/\bSKIP/i.test(g(r,'notes'))};
+      alt:[code,...(g(r,'sec').match(/\d{4}/g)||[])].filter((c,j,a)=>c&&a.indexOf(c)===j),sales:g(r,'sales').toUpperCase(),ext:g(r,'ext'),notes:g(r,'notes'),skipped:/\bSKIP/i.test(g(r,'notes'))||/^TRUE$/i.test(g(r,'lost'))};
   }).filter(Boolean);
 }
 /* ---------- sales summary ---------- */
@@ -185,16 +185,32 @@ function matchAll(orders,sales){
 let ORDERS=[],SALES=[],PAIRS=[],UNITS=[],NAMES={},active='ALL';
 function trimName(code){return NAMES[code]||code;}
 
-// Estimated wait for a trim: recent (90-day) median when there are 3+, else all-time median, else the model's median flagged as an estimate
+// Quote range for a trim. Counts orders that are STILL WAITING, not just the ones that delivered, so slow trims
+// aren't under-quoted. "wk" = point where half of all orders have delivered; "hi" = point where 4 in 5 have.
+// Measured as of the last RDR in sales.csv (AS_OF) so a stale sales file doesn't make everyone look like they're still waiting.
+const MIN_N=6, STALE_DAYS=365; // fewer than MIN_N deliveries = no trim-level quote; open orders older than STALE_DAYS are treated as dead
+let AS_OF=new Date();
+function kmQuote(list){
+  const del=list.filter(o=>o.sale).map(o=>o.wait);
+  const open=list.filter(o=>!o.sale&&!o.skipped&&o.date&&o.date<=AS_OF).map(o=>days(o.date,AS_OF)).filter(d=>d<=STALE_DAYS);
+  if(del.length<MIN_N) return null;
+  const obs=del.map(t=>({t,e:1})).concat(open.map(t=>({t,e:0})));
+  const ts=[...new Set(del)].sort((a,b)=>a-b);let S=1,lo=null,hi=null;
+  for(const t of ts){const risk=obs.filter(o=>o.t>=t).length;const d=obs.filter(o=>o.e&&o.t===t).length;S*=1-d/risk;
+    if(lo==null&&S<=.5)lo=t;if(hi==null&&S<=.2)hi=t;}
+  if(lo==null) return null;
+  return {wk:lo,hi,n:del.length,open:open.length,lo:pct(del,.25)};
+}
 function estimate(code,modelKey){
-  const now=new Date();
-  const d=ORDERS.filter(o=>o.sale&&o.code===code);const rec=d.filter(o=>days(o.sale.date,now)<=90);
-  if(rec.length>=3) return {wk:median(rec.map(o=>o.wait)),n:d.length,lo:pct(d.map(o=>o.wait),.25),hi:pct(d.map(o=>o.wait),.75),basis:'recent'};
-  if(d.length) return {wk:median(d.map(o=>o.wait)),n:d.length,lo:pct(d.map(o=>o.wait),.25),hi:pct(d.map(o=>o.wait),.75),basis:'all'};
-  const m=ORDERS.filter(o=>o.sale&&o.model===modelKey).map(o=>o.wait);
-  if(m.length) return {wk:median(m),n:0,lo:pct(m,.25),hi:pct(m,.75),basis:'model'};
+  const t=kmQuote(ORDERS.filter(o=>o.code===code));
+  if(t) return Object.assign(t,{basis:'trim'});
+  const n=ORDERS.filter(o=>o.sale&&o.code===code).length;
+  const m=kmQuote(ORDERS.filter(o=>o.model===modelKey));
+  if(m) return Object.assign(m,{basis:'model',n});
   return null;
 }
+const W=d=>Math.max(1,Math.round(d/7));
+function quoteStr(e){ if(!e) return '—'; const a=W(e.wk); if(e.hi==null) return a+'+<small>wks</small>'; const b=W(e.hi); return (b>a?a+'–'+b:'~'+a)+'<small>wks</small>'; }
 // Unreserved inventory for a trim code: on lot / in transit / allocated
 function avail(code){
   const u=UNITS.filter(x=>x.code===code&&!x.reserved);
@@ -206,23 +222,23 @@ function renderOverview(){
     const list=ORDERS.filter(o=>o.model===m.key);const done=list.filter(o=>o.sale);const open=list.filter(o=>!o.sale&&!o.skipped&&o.date);
     const codes=[...new Set(list.map(o=>o.code).filter(Boolean))].map(c=>({c,e:estimate(c,m.key),n:done.filter(o=>o.code===c).length,w:open.filter(o=>o.code===c).length}))
       .sort((a,b)=>(b.w-a.w)||(b.n-a.n));
-    const mm=median(done.map(o=>o.wait));
-    return `<div class="mbox" data-m="${m.key}"><h3>${esc(m.label)}</h3><div class="msub">${mm!=null?'typical '+wk(mm)+' wks · ':''}${done.length} delivered · ${open.length} waiting</div>
+    const mq=kmQuote(list);
+    return `<div class="mbox" data-m="${m.key}"><h3>${esc(m.label)}</h3><div class="msub">${mq?'quote '+quoteStr(mq).replace(/<small>|<\/small>/g,' ').trim()+' · ':''}${done.length} delivered · ${open.length} waiting</div>
       ${codes.map(t=>{const e=t.e;const av=avail(t.c);
         let big,cls='',line;
-        const hist=e?(e.basis==='model'?'no deliveries yet — model average':(e.n+' delivered'+(e.n>=3?' · usually '+wk(e.lo)+'–'+wk(e.hi)+' wks':' · '+Math.round(e.wk)+' days'))):'no data';
+        const hist=e?(e.basis==='model'?'only '+e.n+' delivered on this trim — model-wide range':(e.n+' delivered'+(e.hi==null?' · too many still waiting to set an upper end':''))):'not enough history to quote — ask the desk';
         const stock=[av.g?av.g+' in stock':'',av.f?av.f+' in transit':'',av.a?av.a+' allocated':''].filter(Boolean).join(', ');
         if(!t.w){ // no open orders — availability decides
           if(av.g){big='No wait';cls=' now';line='No open orders · '+stock;}
           else if(av.f){big='~'+ETA_DAYS.F+'<small>days</small>';cls=' soon';line='No open orders · '+stock+' · approx. arrival';}
           else if(av.a){big='~'+Math.round(ETA_DAYS.A/7)+'<small>wks</small>';cls=' soon';line='No open orders · '+stock+' · approx. arrival';}
-          else {big=e?(e.wk<21?'~'+Math.round(e.wk)+'<small>days</small>':'~'+Math.round(e.wk/7)+'<small>wks</small>'):'—';cls=' est';line='No open orders · none in stock or inbound · if ordered: '+hist;}
+          else {big=quoteStr(e);cls=' est';line='No open orders · none in stock or inbound · if ordered: '+hist;}
         }else{
-          big=e?(e.wk<21?'~'+Math.round(e.wk)+'<small>days</small>':'~'+Math.round(e.wk/7)+'<small>wks</small>'):'—';cls=e&&e.basis==='model'?' est':'';
+          big=quoteStr(e);cls=!e||e.basis==='model'?' est':'';
           line=hist+' · '+t.w+' waiting'+(av.n?' · '+stock+' unreserved':'');
         }
         return `<div class="trimrow"><div class="tn">${esc(trimName(t.c))}<span>${t.c}</span></div><div class="tw${cls}">${big}</div><div class="tr">${line}</div></div>`;}).join('')}</div>`;
-  }).join('')+`</div><div class="note" style="margin-top:12px">Weeks from order date to RDR, median of matched deliveries. Trims with no open orders show inventory instead: <span style="color:var(--green)">No wait</span> = unreserved unit on the lot; <span style="color:var(--blue)">blue</span> = unreserved unit inbound (in transit ≈ ${ETA_DAYS.F} days, allocated ≈ ${Math.round(ETA_DAYS.A/7)} weeks). Click a model for the trend, who is waiting, and every matched order.</div>`;
+  }).join('')+`</div><div class="note" style="margin-top:12px"><b>Quote range</b> = weeks from order date to delivery (RDR). Low end: half of orders have delivered by then. High end: 4 in 5 have. Orders still waiting are counted, so a trim with a backlog quotes longer than its delivered orders alone would show; a "+" means too many are still waiting to set a high end. Trims with fewer than ${MIN_N} deliveries borrow the model-wide range (shown dimmed); with too little history there is no quote. Open orders older than ${STALE_DAYS} days are ignored as dead. Measured through ${fmt(AS_OF)}, the last RDR in sales.csv. Trims with no open orders show inventory instead: <span style="color:var(--green)">No wait</span> = unreserved unit on the lot; <span style="color:var(--blue)">blue</span> = unreserved unit inbound (in transit ≈ ${ETA_DAYS.F} days, allocated ≈ ${Math.round(ETA_DAYS.A/7)} weeks). Click a model for the trend, who is waiting, and every matched order.</div>`;
   el.querySelectorAll('.mbox').forEach(b=>b.onclick=()=>{active=b.dataset.m;showDetail(true);render();});
 }
 function showDetail(on){document.getElementById('detail').style.display=on?'block':'none';document.getElementById('overview').style.display=on?'none':'block';if(!on)window.scrollTo(0,0);}
@@ -251,8 +267,8 @@ function render(){
   document.getElementById('cards').innerHTML=codes.map(c=>{const w=byCode[c].map(o=>o.wait);const med=median(w),lo=pct(w,.25),hi=pct(w,.75);const rec=byCode[c].filter(o=>days(o.sale.date,now)<=90).map(o=>o.wait);
     const waiting=open.filter(o=>o.code===c);const wnow=waiting.map(o=>days(o.date,now));
     return `<div class="card${w.length<3?' thin':''}"><span class="trim">${esc(trimName(c))}</span><span class="code">${c}${active==='ALL'?' · '+esc((MODELS.find(m=>m.key===byCode[c][0].model)||{}).label||''):''}</span>
-      <div class="big">${wk(med)}<small>weeks typical</small></div>
-      <div class="range">${Math.round(med)} days · middle half ${wk(lo)}–${wk(hi)} wks · fastest ${Math.min(...w)}d, longest ${Math.max(...w)}d</div>
+      <div class="big">${(q=>q&&q.basis==='trim'?quoteStr(q).replace('wks','weeks · quote'):wk(med)+'<small>weeks · delivered median, too few to quote</small>')(estimate(c,byCode[c][0].model))}</div>
+      <div class="range">delivered median ${Math.round(med)} days · middle half ${wk(lo)}–${wk(hi)} wks · fastest ${Math.min(...w)}d, longest ${Math.max(...w)}d</div>
       <div class="bar" title="Middle half of waits, on a 0–${maxD} day scale"><i class="q" style="left:${Math.min(...w)/maxD*100}%;width:${(Math.max(...w)-Math.min(...w))/maxD*100}%"></i><i style="left:${lo/maxD*100}%;width:${Math.max(1,(hi-lo)/maxD*100)}%"></i></div>
       <div class="row"><span><b>${w.length}</b>delivered</span><span><b>${rec.length?wk(median(rec))+' wks':'—'}</b>last 90 days (${rec.length})</span><span><b>${waiting.length}</b>waiting now</span>${waiting.length?`<span><b>${wk(median(wnow))} wks</b>waited so far (median)</span>`:''}</div></div>`;
   }).join('')||'<div class="note">No matched deliveries for this model yet.</div>';
@@ -303,6 +319,7 @@ async function get(paths){for(const p of paths){try{const r=await fetch(p,{cache
   await Promise.all(MODELS.map(async m=>{const t=await get(['data/'+m.file,m.file,'data/NEW VEHICLE ORDERS 2026 - '+m.label.toUpperCase()+'.csv']);if(t){ORDERS.push(...ordersFromCSV(m.key,t));loaded++;}}));
   const st=await get(['sales.csv','data/sales.csv','Sales Summary.csv']);
   if(st){SALES=salesFromCSV(st);SALES.forEach(s=>{if(s.code&&s.mname&&!NAMES[s.code])NAMES[s.code]=s.mname;});}
+  if(SALES.length) AS_OF=SALES.reduce((a,b)=>a.date>b.date?a:b).date;
   PAIRS=matchAll(ORDERS,SALES);
   PAIRS.forEach(c=>{if(!NAMES[c.o.code]&&c.s.mname)NAMES[c.o.code]=c.s.mname+' (ordered '+c.o.code+')';});
   const it=await get(['inventory.csv','data/inventory.csv']);if(it){UNITS=invFromCSV(it);assignUnits(ORDERS,UNITS);}

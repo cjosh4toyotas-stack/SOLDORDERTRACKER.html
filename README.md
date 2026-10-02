@@ -8,7 +8,7 @@ Single-page GitHub Pages site for tracking new-vehicle sold orders by model and 
 3. Open `https://<user>.github.io/<repo>/`.
 
 ## Updating orders
-Export each tab of the NEW VEHICLE ORDERS 2026 sheet as CSV and drop it into `data/` (or next to `index.html` at the repo root) with the same file name (`4RUNNER.csv`, `CAMRY.csv`, `CROWN.csv`, `GRAND_HIGHLANDER.csv`, `HIGHLANDER.csv`, `SIENNA.csv`, `TACOMA.csv`, `TUNDRA.csv`). No rebuild — the page reads the CSVs directly. To add a model, add a line to `MODELS` at the top of the script in `index.html`.
+Export each tab of the NEW VEHICLE ORDERS 2026 sheet as CSV and drop it next to `index.html` at the repo root (a `data/` folder also works) with the same file name (`4RUNNER.csv`, `CAMRY.csv`, `CROWN.csv`, `GRAND_HIGHLANDER.csv`, `HIGHLANDER.csv`, `SIENNA.csv`, `TACOMA.csv`, `TUNDRA.csv`). No rebuild — the page reads the CSVs directly. To add a model, add a line to `MODELS` at the top of the script in `index.html`.
 
 ## Marking orders filled / skipped
 Click a row → pick Open / Filled / Skipped, add the stock # or VIN it was filled with, date and a note. Statuses save in the browser. To carry them across devices or share with the desk, click **Export status.json** and commit the file to the repo root — the page merges it on load (newest edit wins). Orders whose notes contain "SKIP" default to Skipped until you set them.
@@ -25,3 +25,9 @@ Within each model, orders are sequenced by order date (URGENT/PRIORITY first). A
 Linked from the tracker header. Reads the order sheets plus `sales.csv` (the Sales Summary export, RDR rows) and matches each sold order to its RDR by customer name within the model family. Shows typical wait (median) and the middle-half range per trim, the last-90-day trend, a month-by-month chart, and who is still waiting versus the typical wait. `inventory.csv` adds the "filled, not delivered" stage (unit reserved, on lot / in transit / allocated). Refresh by committing a new `sales.csv`.
 
 The tracker also reads `sales.csv`: any order matched to an RDR shows as DELIVERED automatically, and the order check treats it as filled.
+
+## Sheet layout (Oct 2026)
+The RAV4, Grand Highlander, Sienna and 4Runner tabs now use `DATE, BOS, FILLED, LOST, D#, M#, LAST NAME, SECOND, EXT, INT, ACCESORIES, SM, SALES, NOTES`. The page reads both this layout and the older one. A checked **FILLED** box shows the order as Filled, a row with **LOST** checked is left off the tracker entirely; anything you set by hand in the page still wins. Older rows that carry a number in the BOS column keep it as the order #.
+
+## Quote ranges (`waits.html`)
+The wait page shows a quote range per trim for the client order doc: low end = half of orders delivered by then, high end = 4 in 5. Orders still waiting are counted (delivered-only medians under-quote trims with a backlog). Trims with fewer than 6 deliveries borrow the model-wide range; open orders older than 365 days are ignored as dead. Everything is measured through the last RDR in `sales.csv`, so keep that file current.
