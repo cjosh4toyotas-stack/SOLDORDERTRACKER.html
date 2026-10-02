@@ -55,6 +55,17 @@
   details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:8px}
   footer{color:#666;font-size:11px;padding:20px;text-align:center}
   @media print{header a,.tabs{display:none}body{background:#fff;color:#000}}
+  /* ---- ETA banner ---- */
+  #eta{background:#EB0A1E;color:#fff;border-radius:14px;padding:22px 26px;margin:0 0 22px;box-shadow:0 6px 24px rgba(235,10,30,.35)}
+  #eta .lbl{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.9}
+  #eta .pick{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 16px}
+  #eta select{font:inherit;font-size:16px;font-weight:600;padding:10px 12px;border-radius:8px;border:0;background:#fff;color:#1A1A1A;min-width:190px;max-width:100%}
+  #eta .date{font-size:clamp(34px,7vw,68px);font-weight:800;line-height:1.05;letter-spacing:-.01em}
+  #eta .wks{font-size:clamp(17px,2.6vw,24px);font-weight:600;margin-top:8px}
+  #eta .fine{font-size:13px;opacity:.92;margin-top:10px;line-height:1.45}
+  #eta.none{background:#3a3a3a;box-shadow:none}
+  #eta.stock{background:#128a3e;box-shadow:0 6px 24px rgba(18,138,62,.35)}
+  @media print{#eta{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style>
 </head>
 <body>
@@ -63,6 +74,7 @@
   <div style="display:flex;gap:8px"><a href="index.html">Order tracker</a><a href="#" onclick="window.print();return false">Print</a></div>
 </header>
 <div class="wrap">
+  <div id="eta"><div class="lbl">Estimated arrival</div><div class="date">Loading…</div></div>
   <div id="overview"></div>
   <div id="detail">
   <button class="back" id="back">← All models</button>
@@ -119,15 +131,19 @@ function ordersFromCSV(model,text){
   const rows=parseCSV(text).filter(r=>r.some(c=>c.trim()));if(rows.length<2)return[];
   const H=rows[0].map(norm);
   const find=(...names)=>{for(const n of names){const i=H.findIndex(h=>h===n||h.startsWith(n));if(i>=0)return i;}return -1;};
-  let ix={date:0,name:find('LAST NAME','NAME'),code:find('MODEL CODE','MODEL','M#'),sec:find('SECONDARY','SECOND'),sales:find('SALES'),ext:find('EXT'),notes:find('NOTES'),lost:H.findIndex(h=>h==='LOST')};
+  let ix={date:0,name:find('LAST NAME','NAME'),code:find('MODEL CODE','MODEL','M#'),sec:find('SECONDARY','SECOND'),sales:find('SALES'),ext:find('EXT'),notes:find('NOTES'),lost:H.findIndex(h=>h==='LOST'),bos:H.findIndex(h=>h==='BOS'),filled:H.findIndex(h=>h==='FILLED'),delivered:H.findIndex(h=>h==='DELIVERED')};
   if(ix.code<0){ // RAV4 sheet: model-code column has an odd header — pick the column that's mostly 4-digit codes
     const body=rows.slice(1);let best=-1,bs=0;H.forEach((h,i)=>{if(i===ix.name)return;const n=body.filter(r=>/^\s*\d{4}\s*$/.test(r[i]||'')).length;if(n>bs){bs=n;best=i;}});ix.code=best;
   }
   const g=(r,k)=>ix[k]>=0?(r[ix[k]]||'').trim():'';
+  const isChk=v=>/^(TRUE|FALSE)$/i.test(v), isT=v=>/^TRUE$/i.test(v);
   return rows.slice(1).map((r,i)=>{const name=g(r,'name');if(!name)return null;
+    // Folded rows on the sheet are delivered: flagged by a DELIVERED column, or older rows with no checkboxes. FILLED = allocation filled, client waiting.
+    const legacyRow=ix.filled>=0&&!isChk(g(r,'bos'))&&!isChk(g(r,'filled'))&&!isChk(g(r,'lost')), dr=g(r,'delivered');
+    const gone=ix.delivered>=0?(isT(dr)||/\d/.test(dr)||(!isChk(dr)&&legacyRow)):legacyRow;
     const codeRaw=g(r,'code'),code=(codeRaw.match(/\d{4}/)||[''])[0];
     return {model,row:i+2,name:name.toUpperCase(),parts:name.toUpperCase().split(/[^A-Z]+/).filter(p=>p.length>=3),date:parseDate(g(r,'date')),rawDate:g(r,'date'),code,codeRaw,
-      alt:[code,...(g(r,'sec').match(/\d{4}/g)||[])].filter((c,j,a)=>c&&a.indexOf(c)===j),sales:g(r,'sales').toUpperCase(),ext:g(r,'ext'),notes:g(r,'notes'),skipped:/\bSKIP/i.test(g(r,'notes'))||/^TRUE$/i.test(g(r,'lost'))};
+      alt:[code,...(g(r,'sec').match(/\d{4}/g)||[])].filter((c,j,a)=>c&&a.indexOf(c)===j),sales:g(r,'sales').toUpperCase(),ext:g(r,'ext'),notes:g(r,'notes'),gone,active:ix.delivered>=0&&!gone,alloc:isT(g(r,'filled'))&&!gone,bos:isT(g(r,'bos'))&&!isT(g(r,'filled'))&&!gone,skipped:gone||/\bSKIP/i.test(g(r,'notes'))||/^TRUE$/i.test(g(r,'lost'))};
   }).filter(Boolean);
 }
 /* ---------- sales summary ---------- */
@@ -167,7 +183,7 @@ function matchAll(orders,sales){
   const fam={};orders.forEach(o=>o.alt.forEach(c=>{if(!fam[c])fam[c]=o.model;}));
   const cands=[];
   sales.forEach(s=>{const f=fam[s.code];if(!f)return;
-    orders.forEach(o=>{if(o.model!==f||!o.date)return;const d=days(o.date,s.date);if(d<0||d>MAX_WAIT_DAYS)return;
+    orders.forEach(o=>{if(o.model!==f||!o.date||o.active)return;const d=days(o.date,s.date);if(d<0||d>MAX_WAIT_DAYS)return;
       const strong=o.parts.some(p=>s.cmWords.includes(p));
       const lastw=s.custWords[s.custWords.length-1]||'';
       const byLast=o.parts.some(p=>p===lastw)||(o.parts.length>1&&s.custWords.includes(o.parts[0]));
@@ -216,6 +232,42 @@ function avail(code){
   const u=UNITS.filter(x=>x.code===code&&!x.reserved);
   return {g:u.filter(x=>/^G/.test(x.cat)).length,f:u.filter(x=>/^F/.test(x.cat)).length,a:u.filter(x=>/^A/.test(x.cat)).length,n:u.length};
 }
+/* ---------- ETA banner: order today -> estimated arrival dates, recalculated from today's date on every load ---------- */
+let etaModel=null, etaCode=null;
+function renderEta(){
+  const el=document.getElementById('eta');
+  const models=MODELS.filter(m=>ORDERS.some(o=>o.model===m.key));
+  if(!models.length){el.className='none';el.innerHTML='<div class="lbl">Estimated arrival</div><div class="date">No order data</div>';return;}
+  if(!etaModel||!models.some(m=>m.key===etaModel)) etaModel=models[0].key;
+  const cnt={};ORDERS.filter(o=>o.model===etaModel&&o.code).forEach(o=>cnt[o.code]=(cnt[o.code]||0)+1);
+  const codes=Object.keys(cnt).sort((a,b)=>trimName(a).localeCompare(trimName(b))||a.localeCompare(b));
+  if(!etaCode||!cnt[etaCode]) etaCode=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
+  const today=new Date();today.setHours(0,0,0,0);
+  const add=d=>new Date(today.getFullYear(),today.getMonth(),today.getDate()+Math.round(d));
+  const long=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+  const short=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+  const e=estimate(etaCode,etaModel), av=avail(etaCode);
+  let cls='',date,wks,fine;
+  if(av.g){cls='stock';date='In stock now';wks=av.g+' unreserved on the lot';fine=e?'If ordered instead: '+quoteStr(e).replace(/<small>|<\/small>/g,' ').trim()+'.':'';}
+  else if(!e){cls='none';date='No estimate yet';wks='Not enough delivery history on this trim';fine='Check allocation with the desk before quoting a date.';}
+  else{
+    const a=add(e.wk), b=e.hi!=null?add(e.hi):null;
+    if(b&&W(e.hi)>W(e.wk)){date=(a.getFullYear()===b.getFullYear()?short(a):long(a))+' – '+long(b);wks=W(e.wk)+' to '+W(e.hi)+' weeks from today';}
+    else if(b){date='Around '+long(a);wks='about '+W(e.wk)+' weeks from today';}
+    else{date=long(a)+' or later';wks=W(e.wk)+'+ weeks from today · backlog too deep to set a latest date';}
+    fine=(e.basis==='model'?'Model-wide estimate: only '+e.n+' delivered on this trim so far. ':'Based on '+e.n+' delivered and '+e.open+' still waiting on this trim. ')
+      +(w=>w.length?'Waiting now: '+w.filter(o=>!o.alloc&&!o.unit&&!o.bos).length+' need an allocation, '+w.filter(o=>o.bos).length+' have a unit with a change requested, '+w.filter(o=>o.alloc||(o.unit&&!o.bos)).length+' allocation filled. ':'')(ORDERS.filter(o=>o.code===etaCode&&!o.sale&&!o.skipped))
+      +'Earlier date: half of orders have delivered by then. Later date: 4 in 5 have.'
+      +(av.f||av.a?' Unreserved inbound now: '+[av.f?av.f+' in transit':'',av.a?av.a+' allocated':''].filter(Boolean).join(', ')+'.':'');
+  }
+  el.className=cls;
+  el.innerHTML=`<div class="lbl">Estimated arrival · ordered today, ${long(today)}</div>
+    <div class="pick"><select id="etaM" aria-label="Model">${models.map(m=>`<option value="${m.key}"${m.key===etaModel?' selected':''}>${esc(m.label)}</option>`).join('')}</select>
+    <select id="etaT" aria-label="Trim">${codes.map(c=>`<option value="${c}"${c===etaCode?' selected':''}>${esc(trimName(c))} (${c})</option>`).join('')}</select></div>
+    <div class="date">${date}</div><div class="wks">${wks}</div><div class="fine">${fine}</div>`;
+  document.getElementById('etaM').onchange=ev=>{etaModel=ev.target.value;etaCode=null;renderEta();};
+  document.getElementById('etaT').onchange=ev=>{etaCode=ev.target.value;renderEta();};
+}
 function renderOverview(){
   const el=document.getElementById('overview');const now=new Date();
   el.innerHTML='<div class="models">'+MODELS.filter(m=>ORDERS.some(o=>o.model===m.key)).map(m=>{
@@ -259,7 +311,7 @@ function render(){
     <div class="card"><div class="trim">Last 90 days</div><div class="big">${wk(median(recent))}<small>weeks</small></div><div class="range">${recent.length} deliveries since ${fmt(new Date(now-90*86400000))}</div></div>
     <div class="card thin"><div class="trim">Delivered</div><div class="big">${done.length}</div><div class="range">orders matched to an RDR</div></div>
     <div class="card thin"><div class="trim">Waiting now</div><div class="big">${open.length}</div><div class="range">${open.length?'median '+wk(median(open.map(o=>days(o.date,now))))+' wks so far · longest '+Math.max(...open.map(o=>days(o.date,now)))+'d':''}</div></div>
-    <div class="card thin" style="border-left-color:var(--blue)"><div class="trim">Filled, not delivered</div><div class="big">${open.filter(o=>o.unit).length}</div><div class="range">have a unit reserved in inventory (${open.filter(o=>o.unit&&/^G/.test(o.unit.cat)).length} on lot · ${open.filter(o=>o.unit&&/^F/.test(o.unit.cat)).length} in transit · ${open.filter(o=>o.unit&&/^A/.test(o.unit.cat)).length} allocated)</div></div></div>`;
+    <div class="card thin" style="border-left-color:var(--blue)"><div class="trim">Allocation filled, client waiting</div><div class="big">${open.filter(o=>o.unit||o.alloc).length}</div><div class="range">${open.filter(o=>o.alloc).length} marked FILLED on the sheet · ${open.filter(o=>o.bos).length} BOS (allocated unit doesn't match, change requested) · ${open.filter(o=>!o.unit&&!o.alloc&&!o.bos).length} still need an allocation · units matched in inventory (${open.filter(o=>o.unit&&/^G/.test(o.unit.cat)).length} on lot · ${open.filter(o=>o.unit&&/^F/.test(o.unit.cat)).length} in transit · ${open.filter(o=>o.unit&&/^A/.test(o.unit.cat)).length} allocated)</div></div></div>`;
   // per-trim cards
   const byCode={};done.forEach(o=>{(byCode[o.code]=byCode[o.code]||[]).push(o);});
   const maxD=Math.max(60,...done.map(o=>o.wait));
@@ -323,7 +375,7 @@ async function get(paths){for(const p of paths){try{const r=await fetch(p,{cache
   PAIRS=matchAll(ORDERS,SALES);
   PAIRS.forEach(c=>{if(!NAMES[c.o.code]&&c.s.mname)NAMES[c.o.code]=c.s.mname+' (ordered '+c.o.code+')';});
   const it=await get(['inventory.csv','data/inventory.csv']);if(it){UNITS=invFromCSV(it);assignUnits(ORDERS,UNITS);}
-  renderOverview(); showDetail(false);
+  renderEta(); renderOverview(); showDetail(false);
   document.getElementById('srcinfo').textContent=st?`${ORDERS.length} orders from ${loaded} sheets · ${SALES.length} RDRs in sales.csv (${fmt(SALES.reduce((a,b)=>a.date<b.date?a:b).date)} – ${fmt(SALES.reduce((a,b)=>a.date>b.date?a:b).date)}) · ${PAIRS.length} matched`:'sales.csv not found — commit the Sales Summary export as sales.csv in the repo root.';
 })();
 </script>

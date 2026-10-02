@@ -31,3 +31,8 @@ The RAV4, Grand Highlander, Sienna and 4Runner tabs now use `DATE, BOS, FILLED, 
 
 ## Quote ranges (`waits.html`)
 The wait page shows a quote range per trim for the client order doc: low end = half of orders delivered by then, high end = 4 in 5. Orders still waiting are counted (delivered-only medians under-quote trims with a backlog). Trims with fewer than 6 deliveries borrow the model-wide range; open orders older than 365 days are ignored as dead. Everything is measured through the last RDR in `sales.csv`, so keep that file current.
+
+## Delivered vs waiting
+Delivered orders are the folded rows on the sheet. A CSV export can't show which rows are folded, so the pages treat a row as delivered when (a) the sheet has a `DELIVERED` column and it is checked (or holds a date), or (b) it is an older row with no BOS/FILLED/LOST checkboxes. **FILLED** means the allocation is filled and the client is still waiting. `RAV4.csv` carries a `DELIVERED` column set from the sheet as it stood 10/2/26; add that column to the Google Sheet (check it when you fold a row) and the export will keep it accurate.
+
+**BOS** means a unit is allocated but doesn't match the client's request and a change request has been sent. Those orders stay open; the tracker notes it and the wait page counts them separately.

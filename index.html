@@ -269,6 +269,7 @@ function ordersFromCSV(modelKey, text){
     bos: H.findIndex(h=>h==='BOS'),
     filled: H.findIndex(h=>h==='FILLED'),
     lost: H.findIndex(h=>h==='LOST'),
+    delivered: H.findIndex(h=>h==='DELIVERED'),
     lastName: colIndex(H,['LAST NAME','NAME']),
     deal: colIndex(H,['DEAL #','DEAL','D#']),
     code: colIndex(H,['MODEL CODE','MODEL','M#']),
@@ -301,7 +302,15 @@ function ordersFromCSV(modelKey, text){
     let orderNum=g(r,'orderNum'); if(!orderNum && bosRaw && !isBool(bosRaw)) orderNum=bosRaw;
     let notes=g(r,'notes');
     [filledRaw,lostRaw].forEach(v=>{ if(v && !isBool(v)) notes=notes?notes+' · '+v:v; });
+    // Delivered on the sheet = the folded rows. Known two ways: a DELIVERED column (TRUE or a date), or an older row
+    // that never got the BOS/FILLED/LOST checkboxes. FILLED = allocation filled, client still waiting.
+    const isChk=v=>/^(TRUE|FALSE)$/i.test(v), delRaw=g(r,'delivered');
+    const legacyRow=ix.filled>=0 && !isChk(bosRaw) && !isChk(filledRaw) && !isChk(lostRaw);
+    const sheetDelivered=ix.delivered>=0 ? (isT(delRaw)||/\d/.test(delRaw)||(!isChk(delRaw)&&legacyRow)) : legacyRow;
+    // BOS = a unit is allocated but doesn't match what the client ordered; a change request is in with Toyota.
+    if(isT(bosRaw)&&!sheetDelivered&&!isT(filledRaw)) notes='BOS: allocated unit doesn\'t match, change requested'+(notes?' · '+notes:'');
     const o={
+      sheetDelivered, sheetActive: ix.delivered>=0 && !sheetDelivered,
       bos:isT(bosRaw), sheetFilled:isT(filledRaw), sheetLost:isT(lostRaw),
       model:modelKey, rowNum:n+2, rawDate, date,
       urgent:/URGENT|PRIORITY/i.test(rawDate)||/URGENT|PRIORITY/i.test(orderNum)||/PRIORITY #1|URGENT/i.test(notes),
@@ -394,7 +403,8 @@ function statusOf(o){
   if(s) return s;
   if(o.sale) return {status:'filled',stock:o.sale.stock,date:'RDR '+fmtDate(o.sale.date),note:'Delivered '+fmtDate(o.sale.date)+' as '+o.sale.model+' '+o.sale.mname+' ('+o.sale.cust+') — '+o.wait+' days',seeded:true,rdr:true};
   if(/\bSKIP/i.test(o.notes)) return {status:'skipped',note:'From notes: '+o.notes,seeded:true};
-  if(o.sheetFilled) return {status:'filled',note:'Marked FILLED on the order sheet',seeded:true};
+  if(o.sheetDelivered) return {status:'filled',note:'Delivered — folded on the order sheet',seeded:true};
+  if(o.sheetFilled) return {status:'filled',note:'Allocation filled — client waiting on delivery',seeded:true};
   return {status:'open'};
 }
 
